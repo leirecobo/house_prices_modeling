@@ -1,0 +1,2764 @@
+---
+title: 'Modelling Competition: House prices'
+author: Alejandro Alonso, Diego Santano, Leire Cobo, Tomás Vidal, Patricia Parrón
+  & Nile Ansotegi
+date: "18/12/2023"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In the dynamic realm of the real estate market, accurately predicting the selling price of a home stands as a pivotal challenge. This report delves into the task of constructing a predictive model for the sale price of houses, with the purpose of unraveling the complexities inherent in the relationship between a dwelling's characteristics and its ultimate selling price. Further, the model will be a good way for the management to understand the pricing dynamics of a new market. 
+
+The primary aspirations we aim to achieve with this work involve developing an effective price prediction model, identifying key attributes that influence housing prices, and rigorously validating the predictive accuracy of the model.
+
+The model-building process will encompass various steps, from exploratory data analysis to model evaluation, all confined to the techniques studied throughout the course. 
+
+The dataset provided collects the characteristics of 1460 residential homes in Ames, Iowa, as well as their sale price.
+
+This characteristics offer a comprehensive insight into various aspects of houses. Ranging from physical details such as the linear length of the street connected to the property (LotFrontage) and the size of the lot in square feet (LotArea), to structural aspects such as the building class (MSSubClass) and the overall quality of material and finish (OverallQual). 
+Additionally, environmental and location-related aspects are explored, such as the general zoning classification (MSZoning) and proximity to roads or railroads (Condition1, Condition2). Construction-related variables are also addressed, including the presence and quality of masonry veneers (MasVnrType, MasVnrArea), as well as details about the basement (BsmtQual, BsmtCond, BsmtExposure).  
+ 
+## Data preparation 
+
+To start with the analysis, we read the data and observe that the dataset consists of 1460 observations and 81 variables.
+```{r, message=FALSE,warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(caret)
+#library(plotly)
+library(data.table)
+#library(GGally)
+#library(tidymodels)
+library(scales)
+library(MASS)
+#library(lmtest)
+library(reshape2)
+library(stringr)
+library(gridExtra)
+
+data = read_csv("train.csv")
+attach(data)
+
+# we use the functions that are in the R package `functions`
+source("functions.R")
+```
+
+The first column corresponds to the variable `Id`, which is the identifier for each house, so we can remove it from the analysis. The target variable is the `SalePrice`.
+
+As a first step to start the exploratory analysis of the variables, we convert the categorical variables
+that have been taken as numeric by R as factors.
+```{r,comment=""}
+selected_cols = c('MSSubClass','OverallQual','OverallCond','BsmtFullBath','BsmtHalfBath','FullBath',
+                    'HalfBath','BedroomAbvGr','KitchenAbvGr', 'TotRmsAbvGrd', 'Fireplaces','GarageYrBlt',
+                    'GarageCars','MoSold')
+data[, selected_cols] <- lapply(data[, selected_cols], as.factor)
+#We obtain 14 factors
+```
+
+Secondly, in order to prepare the data, we change the name of the variables whose name start with a number, which give problems in R.
+```{r,comment=""}
+colnames(data)[44] = "FstFlrSF"
+colnames(data)[45] = "SndFlrSF"
+colnames(data)[70] = "c3SsnPorch"
+```
+
+Transformation of dependent variable
+```{r,comment=""}
+data$SalePrice = log(data$SalePrice)
+```
+
+
+We apply the function GetColumnsTypes from the R script `functions.R`, which returns the type of each column, and then we split the data into numerical and categorical data
+```{r}
+col_types = GetColumnsTypes(data)
+
+# We split the table into numerical and categorical data
+tabla_char = data[, col_types$character_cols]
+tabla_num = data[, col_types$numeric_cols]
+```
+We obtain 24 numeric variables and 57 categorical.
+
+Then, we treat the NAs of the variables. We have replaced the NAs that represent a category in the categorical variables or that represent a 0 in the case of numerical ones.
+```{r}
+  # BsmtQual if NA means no basement
+  data[is.na(data$BsmtQual),]$BsmtQual = "No_basement"
+  # Fence if NA means no basement
+  data[is.na(data$Fence),]$Fence = "No_fence"
+  # MiscFeature if NA means no basement
+  data[is.na(data$MiscFeature),]$MiscFeature = "None"
+  # BsmtCond if NA means no basement
+  data[is.na(data$BsmtCond),]$BsmtCond = "No_basement"
+  # BsmtFinType1 if NA means no basement
+  data[is.na(data$BsmtFinType1),]$BsmtFinType1 = "No_basement"
+  # Hay 8 observaciones con variable MasVnrArea a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$MasVnrArea),]$MasVnrArea = 0
+  # Hay muchas observaciones con variable LotFrontage a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$LotFrontage),]$LotFrontage = 0
+  # Hay 8 observaciones con variable MasVnrArea a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$MasVnrType),]$MasVnrType = "None"
+  # Alley if NA means no access
+  data[is.na(data$Alley),]$Alley = "No_access"
+  # FireplaceQu if NA means no access
+  data[is.na(data$FireplaceQu),]$FireplaceQu = "No_Fireplace"
+  # GarageType if NA means no access
+  data[is.na(data$GarageType),]$GarageType = "No_Garage"
+  # GarageFinish if NA means no access
+  data[is.na(data$GarageFinish),]$GarageFinish = "No_Garage"
+  # GarageQual if NA means no access
+  data[is.na(data$GarageQual),]$GarageQual = "No_Garage"
+  # GarageCond if NA means no access
+  data[is.na(data$GarageCond),]$GarageCond = "No_Garage"
+  # PoolQC if NA means no pool
+  data[is.na(data$PoolQC),]$PoolQC = "No_Pool"
+  # BsmtExposure if NA means No basement
+  data[is.na(data$BsmtExposure),]$BsmtExposure = "No_Basement"
+```  
+
+## Exploratory analysis
+
+Now we are prepare to start with the exploratory analysis of the categorical variables.
+
+For that purpose, we use the next two functions
+```{r,comment="",warning=FALSE}
+bar_plots_categorical = ListBarplotsCat(data=data)
+box_plots_categorical = ListBoxplotsCat(data)
+```
+
+(1) Functional: Home functionality (Assume typical unless deductions are warranted)
+```{r,comment="",echo=FALSE}
+#Typ	Typical Functionality
+#Min1	Minor Deductions 1
+#Min2	Minor Deductions 2
+##Mod	Moderate Deductions
+#Maj1	Major Deductions 1
+#Maj2	Major Deductions 2
+#Sev	Severely Damaged
+#Sal	Salvage only
+bar_plots_categorical$Functional
+box_plots_categorical$Functional
+gridExtra::grid.arrange(bar_plots_categorical$Functional, box_plots_categorical$Functional)
+summary(lm(SalePrice ~ Functional, data))
+#To confirm the variable is imbalanced
+data%>%count(Functional)
+```
+Conclusion: The values obtained are too imbalanced (1360 obs with the same category) and do not follow a pattern. 
+From the boxplot, we can observe that the different categories do not have a clear effect on the final price. So we decide NOT to consider it.
+
+(2) FireplaceQu: Fireplace quality
+```{r,comment="",echo=FALSE}
+# Ex	Excellent - Exceptional Masonry Fireplace
+# Gd	Good - Masonry Fireplace in main level
+# TA	Average - Prefabricated Fireplace in main living area or Masonry Fireplace in basement
+# Fa	Fair - Prefabricated Fireplace in basement
+# Po	Poor - Ben Franklin Stove
+# NA	No Fireplace
+bar_plots_categorical$FireplaceQu
+box_plots_categorical$FireplaceQu
+gridExtra::grid.arrange(bar_plots_categorical$FireplaceQu, box_plots_categorical$FireplaceQu)
+summary(lm(SalePrice ~ FireplaceQu, data))
+```
+Conclusion: From the boxplot, it does not seem to have a direct impact on the price. However, it is significant and the R^2 is not low. A priori YES include it.
+
+(3) GarageType: Garage location
+```{r,comment="",echo=FALSE}
+# 2Types	More than one type of garage
+# Attchd	Attached to home
+# Basment	Basement Garage
+# BuiltIn	Built-In (Garage part of house - typically has room above garage)
+# CarPort	Car Port
+# Detchd	Detached from home
+# NA	No Garage
+bar_plots_categorical$GarageType
+box_plots_categorical$GarageType
+gridExtra::grid.arrange(bar_plots_categorical$GarageType, box_plots_categorical$GarageType)
+summary(lm(SalePrice ~ GarageType, data))
+```
+Conclusion: From the boxplot, it seems to have some impact on the price. In addition, the R^2 is not low. A priori YES include it.
+
+(4) GarageFinish: Interior finish of the garage
+```{r,echo=FALSE}
+# Fin	Finished
+# RFn	Rough Finished
+# Unf	Unfinished
+# NA	No Garage
+bar_plots_categorical$GarageFinish
+box_plots_categorical$GarageFinish
+gridExtra::grid.arrange(bar_plots_categorical$GarageFinish, box_plots_categorical$GarageFinish)
+summary(lm(SalePrice ~ GarageFinish, data))
+```
+Conclusion: From the boxplot, we observe the price depends on the category of the GarageFinish. Clearly, it is lower for houses without garage. It is significant and the R^2 is quite high. YES include it.
+
+(5) GarageQual: Garage quality
+```{r,comment="",echo=FALSE}
+# Ex	Excellent
+# Gd	Good
+# TA	Typical/Average
+# Fa	Fair
+# Po	Poor
+# NA	No Garage
+
+bar_plots_categorical$GarageQual
+box_plots_categorical$GarageQual
+gridExtra::grid.arrange(bar_plots_categorical$GarageQual, box_plots_categorical$GarageQual)
+summary(lm(SalePrice ~ GarageQual, data))
+#To confirm the variable is imbalanced
+data%>%count(GarageQual)
+```
+Conclusion. The values obtained are too imbalanced (1311 obs with the same category) and do not follow a pattern. 
+From the boxplot, we can observe that the different categories do not have a clear effect on the final price. So we decide NOT to consider it.
+
+(6) GarageCond: Garage condition
+```{r,echo=FALSE}
+# Ex	Excellent
+# Gd	Good
+# TA	Typical/Average
+# Fa	Fair
+# Po	Poor
+# NA	No Garage
+bar_plots_categorical$GarageCond
+box_plots_categorical$GarageCond
+gridExtra::grid.arrange(bar_plots_categorical$GarageCond, box_plots_categorical$GarageCond)
+summary(lm(SalePrice ~ GarageCond, data))
+```
+Conclusion. The values obtained are too imbalanced and do not follow a pattern. 
+From the boxplot, we can observe that the different categories do not have a clear effect on the final price. So we decide NOT to consider it.
+
+(7) PavedDrive: Paved driveway
+```{r,comment="",echo=FALSE}
+# Y	Paved 
+# P	Partial Pavement
+# N	Dirt/Gravel
+
+bar_plots_categorical$PavedDrive
+box_plots_categorical$PavedDrive
+gridExtra::grid.arrange(bar_plots_categorical$PavedDrive, box_plots_categorical$PavedDrive)
+summary(lm(SalePrice ~ PavedDrive, data))
+data%>%count(PavedDrive)
+```
+Conclusion. The values obtained are too imbalanced (1340 obs with the same category) and do not follow a pattern. 
+From the boxplot, we can observe that the different categories do not have a clear effect on the final price. So we decide NOT to consider it.
+
+(8) BsmtHalfBath: Basement half bathrooms
+```{r,echo=FALSE}
+bar_plots_categorical$BsmtHalfBath
+box_plots_categorical$BsmtHalfBath
+gridExtra::grid.arrange(bar_plots_categorical$BsmtHalfBath, box_plots_categorical$BsmtHalfBath)
+summary(lm(SalePrice ~ BsmtHalfBath, data))
+data%>%count(BsmtHalfBath)
+```
+Conclusion. The values obtained are too imbalanced (1378 obs with the same category) and do not follow a pattern. 
+From the boxplot, we can observe that the different categories do not any effect on the final price. It has a negative R^2. So we decide NOT to consider it.
+
+(9) BedroomAbvGr: Bedrooms above grade (does NOT include basement bedrooms)
+```{r,echo=FALSE}
+bar_plots_categorical$BedroomAbvGr
+box_plots_categorical$BedroomAbvGr
+gridExtra::grid.arrange(bar_plots_categorical$BedroomAbvGr, box_plots_categorical$BedroomAbvGr)
+summary(lm(SalePrice ~ BedroomAbvGr, data))
+```
+Conclusion. It is significant, although the R^2 is low. A priori YES include it.
+
+(10) KitchenAbvGr: Kitchens above grade
+```{r,echo=FALSE}
+bar_plots_categorical$KitchenAbvGr
+box_plots_categorical$KitchenAbvGr
+gridExtra::grid.arrange(bar_plots_categorical$KitchenAbvGr, box_plots_categorical$KitchenAbvGr)
+summary(lm(SalePrice ~ KitchenAbvGr, data))
+data%>%count(KitchenAbvGr)
+```
+Conclusion. The values obtained are too imbalanced (1392 obs with the same category) and do not follow a pattern. It has a low R^2 value. So we decide NOT to consider it.
+
+(11)HalfBath: Half baths above grade
+```{r,echo=FALSE}
+bar_plots_categorical$HalfBath
+box_plots_categorical$HalfBath
+gridExtra::grid.arrange(bar_plots_categorical$HalfBath, box_plots_categorical$HalfBath)
+summary(lm(SalePrice ~ HalfBath, data))
+```
+Conclusion: It is significant, although the R^2 is low. From the boxplot, we can observe that the different categories have some effect on the final price. A priori YES include it.
+
+(12) Electrical: Electrical system
+```{r,echo=FALSE}
+# SBrkr	Standard Circuit Breakers & Romex
+# FuseA	Fuse Box over 60 AMP and all Romex wiring (Average)	
+# FuseF	60 AMP Fuse Box and mostly Romex wiring (Fair)
+# FuseP	60 AMP Fuse Box and mostly knob & tube wiring (poor)
+# Mix	Mixed
+bar_plots_categorical$Electrical
+box_plots_categorical$Electrical
+gridExtra::grid.arrange(bar_plots_categorical$Electrical, box_plots_categorical$Electrical)
+summary(lm(SalePrice ~ Electrical, data))
+data%>%count(Electrical)
+```
+Conclusion. The values obtained are too imbalanced (1334 obs with the same category) and do not follow a pattern.Is has a low R^2 value. So we decide NOT to consider it.
+
+(13) BsmtFullBath: Basement full bathrooms
+```{r,echo=FALSE}
+bar_plots_categorical$BsmtFullBath
+box_plots_categorical$BsmtFullBath
+gridExtra::grid.arrange(bar_plots_categorical$BsmtFullBath, box_plots_categorical$BsmtFullBath)
+summary(lm(SalePrice ~ BsmtFullBath, data))
+```
+Conclusion: It is significant, although the R^2 is low. From the boxplot, it seems the different categories do not affect clearly the price. So we decide NOT to consider it.
+
+(14) FullBath: Full bathrooms above grade
+```{r,echo=FALSE}
+bar_plots_categorical$FullBath
+box_plots_categorical$FullBath
+gridExtra::grid.arrange(bar_plots_categorical$FullBath, box_plots_categorical$FullBath)
+summary(lm(SalePrice ~ FullBath, data))
+```
+Conclusion: It is significant and the R^2 value is quite high.From the boxplot, it seems the different categories affect clearly the price. A priori YES consider it.
+
+(15) TotRmsAbvGrd: Total rooms above grade (does not include bathrooms)
+```{r,echo=FALSE}
+bar_plots_categorical$TotRmsAbvGrd
+box_plots_categorical$TotRmsAbvGrd
+gridExtra::grid.arrange(bar_plots_categorical$TotRmsAbvGrd, box_plots_categorical$TotRmsAbvGrd)
+summary(lm(SalePrice ~ TotRmsAbvGrd, data))
+```
+Conclusion. It is significant and the R^2 value is quite high. From the boxplot, it seems the different categories affect clearly the price. It's easy to see that the more rooms, the higher the sale price. We decide YES consider it. 
+
+(16) Fireplaces: Number of fireplaces.
+```{r,echo=FALSE}
+bar_plots_categorical$Fireplaces
+box_plots_categorical$Fireplaces
+gridExtra::grid.arrange(bar_plots_categorical$Fireplaces, box_plots_categorical$Fireplaces)
+summary(lm(SalePrice ~ Fireplaces, data))
+```
+Conclusion. It is significant and the R^2 value is quite high. From the boxplot, it seems the different categories affect clearly the price. It's easy to see that the more number of fireplaces, the higher the sale price. We decide YES consider it. 
+
+(17) GarageCars: Size of garage in car capacity.
+```{r,echo=FALSE}
+bar_plots_categorical$GarageCars
+box_plots_categorical$GarageCars
+gridExtra::grid.arrange(bar_plots_categorical$GarageCars, box_plots_categorical$GarageCars)
+summary(lm(SalePrice ~ GarageCars, data))
+```
+Conclusion. It is significant and the R^2 value is high. From the boxplot, it seems the different categories affect clearly the price. A priori, we decide YES consider it.
+
+(18) HouseStyle: Style of dwelling
+```{r,echo=FALSE}
+#1Story	One story
+#1.5Fin	One and one-half story: 2nd level finished
+#1.5Unf	One and one-half story: 2nd level unfinished
+#2Story	Two story
+#2.5Fin	Two and one-half story: 2nd level finished
+#2.5Unf	Two and one-half story: 2nd level unfinished
+#SFoyer	Split Foyer
+#SLvl	Split Level
+bar_plots_categorical$HouseStyle
+box_plots_categorical$HouseStyle
+gridExtra::grid.arrange(bar_plots_categorical$HouseStyle, box_plots_categorical$HouseStyle)
+summary(lm(SalePrice ~ HouseStyle, data))
+```
+Conclusion. It is significant and the R^2 value is not low. From the boxplot, it seems the different categories affect slightly the price. A priori YES consider it.
+
+(19) RoofMatl: Roof material
+```{r,echo=FALSE}
+#ClyTile	Clay or Tile
+#CompShg	Standard (Composite) Shingle
+#Membran	Membrane
+#Metal	Metal
+#Roll	Roll
+#Tar&Grv	Gravel & Tar
+#WdShake	Wood Shakes
+#WdShngl	Wood Shingles
+bar_plots_categorical$RoofMatl
+box_plots_categorical$RoofMatl
+gridExtra::grid.arrange(bar_plots_categorical$RoofMatl, box_plots_categorical$RoofMatl)
+data%>%count(RoofMatl)
+summary(lm(SalePrice ~ RoofMatl, data))
+```
+Conclusion. The values obtained are too imbalanced (1434 obs with the same category) and do not follow a pattern.Is has a low R^2 value and it is not significant. So we decide NOT to consider it.
+
+(20) RoofStyle: Type of roof
+```{r,echo=FALSE}
+#Flat	Flat
+#Gable	Gable
+#Gambrel	Gabrel (Barn)
+#Hip	Hip
+#Mansard	Mansard
+#Shed	Shed
+bar_plots_categorical$RoofStyle
+box_plots_categorical$RoofStyle
+gridExtra::grid.arrange(bar_plots_categorical$RoofStyle, box_plots_categorical$RoofStyle)
+summary(lm(SalePrice ~ RoofStyle, data))
+```
+Conclusion. The values obtained are too imbalanced, only two categories have a relevant number of observations. Is has a low R^2 value and it is not significant. From the boxplot, it seems the different categories do not affect clearly the price. So we decide NOT to consider it.
+
+(21) Exterior1st: Exterior covering on house
+```{r,echo=FALSE}
+#AsbShng	Asbestos Shingles
+#AsphShn	Asphalt Shingles
+#BrkComm	Brick Common
+#BrkFace	Brick Face
+#CBlock	Cinder Block
+#CemntBd	Cement Board
+#HdBoard	Hard Board
+#ImStucc	Imitation Stucco
+#MetalSd	Metal Siding
+#Other	Other
+#Plywood	Plywood
+#PreCast	PreCast	
+#Stone	Stone
+#Stucco	Stucco
+#VinylSd	Vinyl Siding
+#Wd Sdng	Wood Siding
+#WdShing	Wood Shingles
+bar_plots_categorical$Exterior1st
+box_plots_categorical$Exterior1st
+gridExtra::grid.arrange(bar_plots_categorical$Exterior1st, box_plots_categorical$Exterior1st)
+summary(lm(SalePrice ~Exterior1st , data))
+```
+Conclusion. It is significant and the R^2 value is not low. From the boxplot, it seems the different categories affect the price. A priori YES consider it.
+
+(22) Exterior2nd: Exterior covering on house (if more than one material)
+```{r,echo=FALSE}
+#AsbShng	Asbestos Shingles
+#AsphShn	Asphalt Shingles
+#BrkComm	Brick Common
+#BrkFace	Brick Face
+#CBlock	Cinder Block
+#CemntBd	Cement Board
+#HdBoard	Hard Board
+#ImStucc	Imitation Stucco
+#MetalSd	Metal Siding
+#Other	Other
+#Plywood	Plywood
+#PreCast	PreCast
+#Stone	Stone
+#Stucco	Stucco
+#VinylSd	Vinyl Siding
+#Wd Sdng	Wood Siding
+#WdShing	Wood Shingles
+bar_plots_categorical$Exterior2nd
+box_plots_categorical$Exterior2nd
+gridExtra::grid.arrange(bar_plots_categorical$Exterior2nd, box_plots_categorical$Exterior2nd)
+summary(lm(SalePrice ~ Exterior2nd, data))
+
+```
+Conclusion. It is significant and the R^2 value is not low. From the boxplot, it seems the different categories affect the price. A priori YES consider it.
+
+(23) MasVnrType: Masonry veneer type
+```{r,echo=FALSE}
+#BrkCmn	Brick Common
+#BrkFace	Brick Face
+#CBlock	Cinder Block
+#None	None
+#Stone	Stone
+bar_plots_categorical$MasVnrType
+box_plots_categorical$MasVnrType
+gridExtra::grid.arrange(bar_plots_categorical$MasVnrType, box_plots_categorical$MasVnrType)
+summary(lm(SalePrice ~ MasVnrType, data))
+```
+Conclusion. It is significant and the R^2 value is not low. From the boxplot, it seems the different categories affect the price. A priori YES consider it.
+
+(24) ExterQual: Evaluates the quality of the material on the exterior 
+```{r,echo=FALSE}
+#Ex	Excellent
+#Gd	Good
+#TA	Average/Typical
+#Fa	Fair
+#Po	Poor
+bar_plots_categorical$ExterQual
+box_plots_categorical$ExterQual
+gridExtra::grid.arrange(bar_plots_categorical$ExterQual, box_plots_categorical$ExterQual)
+summary(lm(SalePrice ~ ExterQual, data))
+```
+Conclusion. It is significant and the R^2 value is very high. From the boxplot, it seems the different categories affect clearly the price. A priori YES consider it.
+
+(25) ExterCond: Evaluates the present condition of the material on the exterior
+```{r,echo=FALSE}
+#Ex	Excellent
+#Gd	Good
+#TA	Average/Typical
+#Fa	Fair
+#Po	Poor
+bar_plots_categorical$ExterCond
+box_plots_categorical$ExterCond
+gridExtra::grid.arrange(bar_plots_categorical$ExterCond, box_plots_categorical$ExterCond)
+data%>%count(ExterCond)
+summary(lm(SalePrice ~ ExterCond, data))
+```
+Conclusion. The values obtained are too imbalanced (1434 obs with the same category). Is has a low R^2 value and it is not significant. From the boxplot. So we decide NOT to consider it.
+
+(26) OverallCond: Rates the overall condition of the house
+```{r,echo=FALSE}
+#10	Very Excellent
+#9	Excellent
+#8	Very Good
+#7	Good
+#6	Above Average	
+#5	Average
+#4	Below Average	
+#3	Fair
+#2	Poor
+#1	Very Poor
+bar_plots_categorical$OverallCond
+box_plots_categorical$OverallCond
+gridExtra::grid.arrange(bar_plots_categorical$OverallCond, box_plots_categorical$OverallCond)
+summary(lm(SalePrice ~ OverallCond, data))
+```
+Conclusion. It is significant and the R^2 value is high. From the boxplot, it seems the different categories have some effect in the price. A priori YES consider it.
+
+(27) OverallQual: OverallQual: Rates the overall material and finish of the house
+```{r,echo=FALSE}
+# 10	Very Excellent
+# 9	Excellent
+# 8	Very Good
+# 7	Good
+# 6	Above Average
+# 5	Average
+# 4	Below Average
+# 3	Fair
+# 2	Poor
+# 1	Very Poor
+bar_plots_categorical$OverallQual
+box_plots_categorical$OverallQual
+gridExtra::grid.arrange(bar_plots_categorical$OverallQual, box_plots_categorical$OverallQual)
+summary(lm(SalePrice ~OverallQual, data))
+```
+Conclusion. It is significant and the R^2 value is very high. From the boxplot, it seems the different categories affect clearly the price. We can see that the higher the quality, the higher the price. So we decide YES consider it.
+
+(28) Foundation: Type of foundation
+```{r,echo=FALSE}
+# BrkTil	Brick & Tile
+# CBlock	Cinder Block
+# PConc	Poured Contrete	
+# Slab	Slab
+# Stone	Stone
+# Wood	Wood
+
+# categorical, high correlation
+
+bar_plots_categorical$Foundation
+box_plots_categorical$Foundation
+gridExtra::grid.arrange(bar_plots_categorical$Foundation, box_plots_categorical$Foundation)
+# We can see that the houses with Poured Contrete (PConc) have a higher sale price 
+
+summary(lm(SalePrice ~ Foundation, data)) # R-squared:  0.3037
+
+# Grouping the values that are not CBlock or PConc
+data_attempt <- data
+data_attempt <- data_attempt %>%
+  mutate(Foundation = if_else(Foundation %in% c("CBlock", "PConc"), Foundation, "Other"))
+
+barplot(table(data_attempt$Foundation))
+GetBoxPlotCat(data_attempt,"Foundation")
+summary(lm(SalePrice ~ Foundation, data_attempt)) # R-squared:  0.2971
+```
+YES, it should be not be discarded, as the R^2=0.2971 is quite high and the price changes depending on the type of foundation.
+
+
+(29) BsmtCond: Evaluates the general condition of the basement
+```{r,echo=FALSE}
+# Ex	Excellent
+# Gd	Good
+# TA	Typical - slight dampness allowed
+# Fa	Fair - dampness or some cracking or settling
+# Po	Poor - Severe cracking, settling, or wetness
+# NA	No Basement
+
+# categorical, high correlation, missing values, imbalance
+
+# Again, we first choose the levels of this variable
+order <- c("Ex", "Gd", "TA", "Fa", "Po", "NB")
+data$BsmtCond <- factor(data$BsmtCond, levels=order)
+
+bar_plots_categorical$BsmtCond
+box_plots_categorical$BsmtCond
+gridExtra::grid.arrange(bar_plots_categorical$BsmtCond, box_plots_categorical$BsmtCond)
+sum(is.na(data$BsmtCond))
+mean(is.na(data$BsmtCond)) # 2.5% of NA (NA represents No basement, not missing value)
+mean(data$BsmtCond=="TA",na.rm = TRUE) # 92.12% of "TA"->Typical values, very imbalanced
+
+data[is.na(data$BsmtCond),]$BsmtCond = "NB"
+
+cor(data$SalePrice,as.numeric(data$BsmtCond), use = "complete.obs") 
+# It makes sense to consider the categorical variable as numeric, as it it is ordinal.
+# NEGATIVE cor=-0.2063743
+summary(lm(SalePrice ~ BsmtCond, data)) # Low R-squared:  0.04939
+```
+The variable is highly imbalanced. There is negative correlation,
+the worse the general condition of the basement, the lower the sale price.
+However, the variability of category is large, very wide range of values.
+Do NOT consider it.
+
+
+(30) BsmtExposure: Refers to walkout or garden level walls
+```{r,echo=FALSE}
+# Gd	Good Exposure
+# Av	Average Exposure (split levels or foyers typically score average or above)	
+# Mn	Minimum Exposure
+# No	No Exposure
+# NA	No Basement
+
+# categorical, missing values
+
+# Ordinal variable
+order <- c("Gd", "Av", "Mn", "No", "NB")
+data$BsmtExposure <- factor(data$BsmtExposure, levels=order)
+
+barplot(table(data$BsmtExposure))
+GetBoxPlotCat(data_attempt,"BsmtExposure")
+gridExtra::grid.arrange(bar_plots_categorical$BsmtExposure, box_plots_categorical$BsmtExposure)
+
+sum(is.na(data$BsmtExposure))
+mean(is.na(data$BsmtExposure)) # 2.6% of NA (NA represents No basement, not missing value)
+sum(data$BsmtExposure=="No",na.rm = TRUE)
+mean(data$BsmtExposure=="No",na.rm = TRUE) # 67.01% of "No"->No exposure
+
+data[is.na(data$BsmtExposure),]$BsmtExposure = "NB"
+
+cor(data$SalePrice,as.numeric(data$BsmtExposure), use = "complete.obs")  # cor=-0.3274443
+# It makes sense to consider the categorical variable as numeric, as it it is ordinal.
+summary(lm(SalePrice ~ BsmtExposure, data)) # Low R-squared:  0.1102
+```
+The boxplots do not show a big difference wrt the response, so
+this variable has not a significant effect on the sale price.
+The value "No" has a large variability.
+Do NOT consider it.
+
+
+(31) BsmtFinType1: Rating of basement finished area
+```{r,echo=FALSE}
+# GLQ	Good Living Quarters
+# ALQ	Average Living Quarters
+# BLQ	Below Average Living Quarters	
+# Rec	Average Rec Room
+# LwQ	Low Quality
+# Unf	Unfinshed
+# NA	No Basement
+
+# categorical, missing values
+
+bar_plots_categorical$BsmtFinType1
+box_plots_categorical$BsmtFinType1
+gridExtra::grid.arrange(bar_plots_categorical$BsmtFinType1, box_plots_categorical$BsmtFinType1)
+sum(is.na(data$BsmtFinType1))
+mean(is.na(data$BsmtFinType1)) # 2.5% of NA 
+
+levels <- c("GLQ", "ALQ", "BLQ", "Rec", "LwQ", "Unf", "NB")
+data$BsmtFinType1 <- factor(data$BsmtFinType1, levels=levels)
+data[is.na(data$BsmtFinType1),]$BsmtFinType1 = "NB" # NA represents No basement, not missing value
+
+summary(lm(SalePrice ~ BsmtFinType1, data)) # Low R-squared:  0.2277
+```
+Most of the values have a similar effect on the sale price, but there is  one GLQ which makes the price significantly higher. This means that when the basement's
+finished area is designed and finished to a high standard, the sale price grows notoriously. Yes, it should be considered.
+
+
+(32) BsmtFinType2: Rating of basement finished area (if multiple types)
+```{r,echo=FALSE}
+# GLQ	Good Living Quarters
+# ALQ	Average Living Quarters
+# BLQ	Below Average Living Quarters	
+# Rec	Average Rec Room
+# LwQ	Low Quality
+# Unf	Unfinshed
+# NA	No Basement
+
+# categorical, high correlation, missing values, imbalance
+
+bar_plots_categorical$BsmtFinType2
+box_plots_categorical$BsmtFinType2
+gridExtra::grid.arrange(bar_plots_categorical$BsmtFinType2, box_plots_categorical$BsmtFinType2)
+sum(is.na(data$BsmtFinType2))
+mean(is.na(data$BsmtFinType2)) # 2.6% of NA (NA represents No basement, not missing value)
+
+sum(data$BsmtFinType2 == "Unf", na.rm = TRUE) / length(data$BsmtFinType2) 
+# 86% of the values belong to Unf. Very imbalanced
+
+summary(lm(SalePrice ~ BsmtFinType2, data)) # Very low R-squared:  0.007051
+```
+Values are very imbalanced, 86% of unfinished. Also, the categories do not affect on the sale price. A priori, do NOT consider it.
+
+
+(33) Heating: Type of heating
+```{r,echo=FALSE}
+# Floor	Floor Furnace
+# GasA	Gas forced warm air furnace
+# GasW	Gas hot water or steam heat
+# Grav	Gravity furnace	
+# OthW	Hot water or steam heat other than gas
+# Wall	Wall furnace
+
+# Categorical, high correlation, imbalance
+
+bar_plots_categorical$Heating
+box_plots_categorical$Heating
+gridExtra::grid.arrange(bar_plots_categorical$Heating, box_plots_categorical$Heating)
+
+mean(data$Heating=="GasA") # Imbalance %97.80 of values are GasA
+
+summary(lm(SalePrice ~ Heating, data)) # Low R-squared:  0.03295
+```
+The values obtained are too imbalanced and do not follow a pattern.
+But each type of heating affects directly the final price.
+However, looking at boxplot of GasA, we can see there is wide variability, so this
+specific type GasA has no clear effect on the final price.
+Do NOT consider it.
+
+
+(34) CentralAir: Central air conditioning
+```{r,echo=FALSE}
+# N	No
+# Y	Yes
+
+# Binary
+
+bar_plots_categorical$CentralAir
+box_plots_categorical$CentralAir
+gridExtra::grid.arrange(bar_plots_categorical$CentralAir, box_plots_categorical$CentralAir)
+
+
+summary(lm(SalePrice ~ CentralAir, data)) # Low R-squared:  0.1236
+```
+The correlation between CentralAir and the log of the sale price is
+quite high. The houses that contain central air are significantly more expensive
+that the ones that do not have it.
+YES, consider it.
+
+
+(35) MSSubClass: Identifies the type of dwelling involved in the sale.	
+```{r,echo=FALSE}
+# 20	1-STORY 1946 & NEWER ALL STYLES
+# 30	1-STORY 1945 & OLDER
+# 40	1-STORY W/FINISHED ATTIC ALL AGES
+# 45	1-1/2 STORY - UNFINISHED ALL AGES
+# 50	1-1/2 STORY FINISHED ALL AGES
+# 60	2-STORY 1946 & NEWER
+# 70	2-STORY 1945 & OLDER
+# 75	2-1/2 STORY ALL AGES
+# 80	SPLIT OR MULTI-LEVEL
+# 85	SPLIT FOYER
+# 90	DUPLEX - ALL STYLES AND AGES
+# 120	1-STORY PUD (Planned Unit Development) - 1946 & NEWER
+# 150	1-1/2 STORY PUD - ALL AGES
+# 160	2-STORY PUD - 1946 & NEWER
+# 180	PUD - MULTILEVEL - INCL SPLIT LEV/FOYER
+# 190	2 FAMILY CONVERSION - ALL STYLES AND AGES
+
+bar_plots_categorical$MSSubClass
+box_plots_categorical$MSSubClass # This variable has a direct effect on the SalePrice
+gridExtra::grid.arrange(bar_plots_categorical$MSSubClass, box_plots_categorical$MSSubClass)
+
+summary(lm(SalePrice ~ MSSubClass, data)) # R-squared:  0.3301
+```
+Too many variables, imbalanced. "20", "60" and "50" are the ones
+that are repeated most.  But if we look below it looks like it might be significant,
+with a very low R^2=0.007104. The sale price cahnges nootiously according to each type.
+
+
+(36) MSZoning: Identifies the general zoning classification of the sale.
+```{r,echo=FALSE}
+# A	Agriculture
+# C	Commercial
+# FV	Floating Village Residential
+# I	Industrial
+# RH	Residential High Density
+# RL	Residential Low Density
+# RP	Residential Low Density Park 
+# RM	Residential Medium Density
+
+bar_plots_categorical$MSZoning
+box_plots_categorical$MSZoning # This variable has a direct effect on the SalePrice
+gridExtra::grid.arrange(bar_plots_categorical$MSZoning, box_plots_categorical$MSZoning)
+
+summary(lm(SalePrice ~ MSZoning, data)) # R-squared: 0.1758
+```
+It has a direct impact on the price, as we can see on the boxplots. A priori YES include it.
+
+
+(37) Street: Type of road access to property
+```{r,echo=FALSE}
+# Grvl	Gravel	
+# Pave	Paved
+
+bar_plots_categorical$Street
+box_plots_categorical$Street # This variable has a direct effect on the SalePrice
+gridExtra::grid.arrange(bar_plots_categorical$Street, box_plots_categorical$Street)
+
+mean(data$Street=="Pave") # 99.58% 
+
+summary(lm(SalePrice ~ Street, data)) # R-squared:  0.003291
+```
+99.58% of the houses have paved access. Very imbalanced. Do NOT consider it.
+
+
+(38) Alley: Type of alley access to property
+```{r,echo=FALSE}
+# Grvl	Gravel
+# Pave	Paved
+# NA 	No alley access
+
+bar_plots_categorical$Alley
+box_plots_categorical$Alley 
+gridExtra::grid.arrange(bar_plots_categorical$Alley, box_plots_categorical$Alley)
+
+mean(is.na(data$Alley))
+order <- c("Grvl", "Pave", "NA")
+data$Alley <- factor(data$Alley, levels=order)
+data[is.na(data$Alley),]$Alley = "NA"
+
+summary(lm(SalePrice ~ Alley, data)) # R-squared:  0.02041
+```
+The R^2=0.02041 is very low, but the variable seems significant. YES consider it.
+
+
+(39) LotShape: General shape of property
+```{r,echo=FALSE}
+# Reg	Regular	
+# IR1	Slightly irregular
+# IR2	Moderately Irregular
+# IR3	Irregular
+
+bar_plots_categorical$LotShape
+box_plots_categorical$LotShape  # Not a big impact on the sale price
+gridExtra::grid.arrange(bar_plots_categorical$LotShape, box_plots_categorical$LotShape)
+
+
+summary(lm(SalePrice ~ LotShape, data)) # R-squared:  0.0763
+```
+Imbalanced. Not much difference in boxplots, sale price is very similar in the four categories. Doesn't make sense to group the data either. YES consider it.
+
+
+(40) LandContour: Flatness of the property
+```{r,echo=FALSE}
+# Lvl	Near Flat/Level	
+# Bnk	Banked - Quick and significant rise from street grade to building
+# HLS	Hillside - Significant slope from side to side
+# Low	Depression
+
+bar_plots_categorical$LandContour # Imbalance
+box_plots_categorical$LandContour 
+gridExtra::grid.arrange(bar_plots_categorical$LandContour, box_plots_categorical$LandContour)
+
+mean(data$LandContour=="Lvl") # 89.79%
+
+summary(lm(SalePrice ~ LandContour, data))
+```
+Highly imbalanced (89.79% of *Lvl*). However, looking at the p-value we see that this variable is very significant. YES, do not discard it.
+
+
+(41) Utilities: Type of utilities available
+```{r,echo=FALSE}
+# AllPub	All public Utilities (E,G,W,& S)	
+# NoSewr	Electricity, Gas, and Water (Septic Tank)
+# NoSeWa	Electricity and Gas Only
+# ELO	Electricity only	
+
+bar_plots_categorical$Utilities 
+box_plots_categorical$Utilities 
+gridExtra::grid.arrange(bar_plots_categorical$Utilities, box_plots_categorical$Utilities)
+
+sum(data$Utilities=="NoSeWa") # Only one variable
+mean(data$Utilities=="AllPub") # High imbalance: 99.93151% of "AllPub"
+
+summary(lm(SalePrice ~ Utilities, data)) # R-squared:  0.0002049
+```
+It is highly imbalanced. Out of the four categories, all observations belog to *AllPub* except one belonging to *NoSeWa*. Do NOT include.
+
+
+(42) LotConfig: Lot configuration
+```{r,echo=FALSE}
+# Inside	Inside lot
+# Corner	Corner lot
+# CulDSac	Cul-de-sac
+# FR2	Frontage on 2 sides of property
+# FR3	Frontage on 3 sides of property
+
+bar_plots_categorical$LotConfig 
+box_plots_categorical$LotConfig 
+gridExtra::grid.arrange(bar_plots_categorical$LotConfig, box_plots_categorical$LotConfig)
+
+summary(lm(SalePrice ~ LotConfig, data)) # R-squared:  0.02102
+
+# Very imbalanced again. Maybe group them "Inside" and "Other".
+# Not significant nor explainable. Let's group.
+data[data$LotConfig != "Inside", ]$LotConfig = "Other"
+summary(lm(SalePrice ~ LotConfig,data))
+```
+
+(43) LandSlope: Slope of property
+```{r,echo=FALSE}
+# Gtl	Gentle slope
+# Mod	Moderate Slope	
+# Sev	Severe Slope
+
+bar_plots_categorical$LandSlope # Imbalance
+box_plots_categorical$LandSlope 
+gridExtra::grid.arrange(bar_plots_categorical$LandSlope, box_plots_categorical$LandSlope)
+
+summary(lm(SalePrice ~ LandSlope, data)) # R-squared:  0.002682
+```
+Do NOT include.
+
+
+(44) Neighborhood: Physical locations within Ames city limits
+```{r,echo=FALSE}
+# Blmngtn	Bloomington Heights
+# Blueste	Bluestem
+# BrDale	Briardale
+# BrkSide	Brookside
+# ClearCr	Clear Creek
+# CollgCr	College Creek
+# Crawfor	Crawford
+# Edwards	Edwards
+# Gilbert	Gilbert
+# IDOTRR	Iowa DOT and Rail Road
+# MeadowV	Meadow Village
+# Mitchel	Mitchell
+# Names	North Ames
+# NoRidge	Northridge
+# NPkVill	Northpark Villa
+# NridgHt	Northridge Heights
+# NWAmes	Northwest Ames
+# OldTown	Old Town
+# SWISU	South & West of Iowa State University
+# Sawyer	Sawyer
+# SawyerW	Sawyer West
+# Somerst	Somerset
+# StoneBr	Stone Brook
+# Timber	Timberland
+# Veenker	Veenker
+
+bar_plots_categorical$Neighborhood 
+box_plots_categorical$Neighborhood 
+gridExtra::grid.arrange(bar_plots_categorical$Neighborhood, box_plots_categorical$Neighborhood)
+
+summary(lm(SalePrice ~ Neighborhood, data)) # R-squared:  0.5456
+```
+Even if it has many categories, it is a very significant variable and it explains a lot,
+R^2=0.5456. YES, consider it.
+
+
+(45) Condition1: Proximity to various conditions
+```{r,echo=FALSE}
+# Artery	Adjacent to arterial street
+# Feedr	Adjacent to feeder street	
+# Norm	Normal	
+# RRNn	Within 200' of North-South Railroad
+# RRAn	Adjacent to North-South Railroad
+# PosN	Near positive off-site feature--park, greenbelt, etc.
+# PosA	Adjacent to postive off-site feature
+# RRNe	Within 200' of East-West Railroad
+# RRAe	Adjacent to East-West Railroad
+
+bar_plots_categorical$Condition1 # Imbalance
+box_plots_categorical$Condition1 
+gridExtra::grid.arrange(bar_plots_categorical$Condition1, box_plots_categorical$Condition1)
+
+mean(data$Condition1=="Norm") # 86.30% of the observations belong to "Norm"
+
+summary(lm(SalePrice ~ Condition1, data))
+```
+Highly imbalanced, 86.30% of the observed houses have normal condition. A priori do NOT include it.
+
+
+(46) Condition2: Proximity to various conditions (if more than one is present)
+```{r,echo=FALSE}
+# Artery	Adjacent to arterial street
+# Feedr	Adjacent to feeder street	
+# Norm	Normal	
+# RRNn	Within 200' of North-South Railroad
+# RRAn	Adjacent to North-South Railroad
+# PosN	Near positive off-site feature--park, greenbelt, etc.
+# PosA	Adjacent to postive off-site feature
+# RRNe	Within 200' of East-West Railroad
+# RRAe	Adjacent to East-West Railroad
+
+bar_plots_categorical$Condition2
+box_plots_categorical$Condition2
+gridExtra::grid.arrange(bar_plots_categorical$Condition2, box_plots_categorical$Condition2)
+
+summary(lm(SalePrice ~ Condition2, data)) # p-value: 0.01382
+```
+The variable is highly imbalanced to the category *Norm* again. Boxplots do not give much information, there are two many categories and the one that appears the most has a large variability. Besides, looking at the p-value we see that it is not very significant and the R^2=0.007276 is very low.
+Do NOT consider it.
+
+
+(47) BldgType: Type of dwelling
+```{r,echo=FALSE}
+# 1Fam	  Single-family Detached	
+# 2FmCon	Two-family Conversion; originally built as one-family dwelling
+# Duplx	  Duplex
+# TwnhsE	Townhouse End Unit
+# TwnhsI	Townhouse Inside Unit
+
+bar_plots_categorical$BldgType
+box_plots_categorical$BldgType
+gridExtra::grid.arrange(bar_plots_categorical$BldgType, box_plots_categorical$BldgType)
+
+mean(data$BldgType=="1Fam") # 83.56% of 1Fam
+data%>%count(BldgType) # 1220
+
+summary(lm(SalePrice ~ BldgType, data))
+
+# Try grouping all the categories except"1Fam"
+data_pruebas = data
+data_pruebas[data_pruebas$BldgType != "1Fam", ]$BldgType = "Other"
+GetBoxPlotCat(data_pruebas, "BldgType")
+
+summary(lm(SalePrice ~ BldgType, data_pruebas))
+```
+There is a high imbalance with the category referring to the single-family Detached 
+(83.56%). The is not a big difference on the sale price for each type. However, the p-value obtained shows that the variable is very significant. A priori YES, do not discard it. After grouping it the R^2 decreases, so probably consider it without grouping.
+
+
+(48) PoolQC: Pool quality
+```{r,echo=FALSE}
+# Ex	Excellent
+# Gd	Good
+# TA	Average/Typical
+# Fa	Fair
+# NA	No Pool
+
+bar_plots_categorical$PoolQC
+box_plots_categorical$PoolQC
+gridExtra::grid.arrange(bar_plots_categorical$PoolQC, box_plots_categorical$PoolQC)
+
+data%>%count(PoolQC) # 1453
+mean(data$PoolQC=="No_Pool") # 99.52% of "No_Pool"
+
+summary(lm(SalePrice ~ PoolQC, data))
+```
+The variable is highly imbalanced, as 1453 out of 1460 houses do not have a pool. However, when the pool is in excellent condition the price of the house improves notoriously. It appears to be significant. A priori YES, do not discard it.
+
+
+(49) Fence: Fence quality
+```{r,echo=FALSE}
+# GdPrv	Good Privacy
+# MnPrv	Minimum Privacy
+# GdWo	Good Wood
+# MnWw	Minimum Wood/Wire
+# NA	  No Fence
+
+bar_plots_categorical$Fence
+box_plots_categorical$Fence
+gridExtra::grid.arrange(bar_plots_categorical$Fence, box_plots_categorical$Fence)
+
+summary(lm(SalePrice ~ Fence, data))
+```
+The variable is imbalanced. Looking at the boxplots it doesn't appear to be a difference on the sale price with respect to the categories. A priori, YES do not discard it.
+
+
+(50) MiscFeature: Miscellaneous feature not covered in other categories
+```{r,echo=FALSE}
+# Elev	Elevator
+# Gar2	2nd Garage (if not described in garage section)
+# Othr	Other
+# Shed	Shed (over 100 SF)
+# TenC	Tennis Court
+# NA	  None
+
+bar_plots_categorical$MiscFeature
+box_plots_categorical$MiscFeature
+gridExtra::grid.arrange(bar_plots_categorical$MiscFeature, box_plots_categorical$MiscFeature)
+
+mean(data$MiscFeature=="None")
+
+summary(lm(SalePrice ~ MiscFeature, data))
+```
+Highly imbalanced, 96.30% of the observations belong to the same category "None". It is not very significant and it does not explain much. Do NOT consider it.
+
+
+(51) MoSold: Month Sold (MM)
+```{r,echo=FALSE}
+bar_plots_categorical$MoSold
+box_plots_categorical$MoSold
+gridExtra::grid.arrange(bar_plots_categorical$MoSold, box_plots_categorical$MoSold)
+
+########################### CONCLUSION ###########################
+## Parece haber una mayor venta de casas de mayo a julio
+summary(lm(SalePrice ~ MoSold, data))
+```
+It seems there has been a larger amount of sales from May to July. However, the price of the sales have not vary per months. Besides, looking at the p-value, the variable is not significant. Do NOT consider it.
+
+
+(52) SaleType: Type of sale
+```{r,echo=FALSE}
+# WD 	  Warranty Deed - Conventional
+# CWD	  Warranty Deed - Cash
+# VWD	  Warranty Deed - VA Loan
+# New	  Home just constructed and sold
+# COD	  Court Officer Deed/Estate
+# Con	  Contract 15% Down payment regular terms
+# ConLw	Contract Low Down payment and low interest
+# ConLI	Contract Low Interest
+# ConLD	Contract Low Down
+# Oth	  Other
+
+bar_plots_categorical$SaleType
+box_plots_categorical$SaleType
+gridExtra::grid.arrange(bar_plots_categorical$SaleType, box_plots_categorical$SaleType)
+
+summary(lm(SalePrice ~ SaleType, data))
+## Only some categories are significant
+# WD 	  Warranty Deed - Conventional
+# CWD	  Warranty Deed - Cash
+# New	  Home just constructed and sold
+# Con	  Contract 15% Down payment regular terms
+tabla_pruebas = data
+tabla_pruebas[!(tabla_pruebas$SaleType %in% c("WD", "CWD", "Con", "New")), ]$SaleType = "Other"
+summary(lm(SalePrice ~ SaleType, tabla_pruebas))
+
+## Si se agrupa es negativo para la explicabilidad de la variable
+## Tiene un R2 importante, creo que se tiene que comentar que hacer con esta variable 
+########################### CONCLUSION ###########################
+
+```
+
+(53) SaleCondition: Condition of sale
+```{r,echo=FALSE}
+# Normal	Normal Sale
+# Abnorml	Abnormal Sale -  trade, foreclosure, short sale
+# AdjLand	Adjoining Land Purchase
+# Alloca	Allocation - two linked properties with separate deeds, typically condo with a garage unit	
+# Family	Sale between family members
+# Partial	Home was not completed when last assessed (associated with New Homes)
+
+bar_plots_categorical$SaleCondition
+box_plots_categorical$SaleCondition
+gridExtra::grid.arrange(bar_plots_categorical$SaleCondition, box_plots_categorical$SaleCondition)
+
+mean(data$SaleCondition=="Normal")
+
+summary(lm(SalePrice ~ SaleCondition, data))
+
+# Try grouping Alloca, Family, Abnorml and AdjLand, as they are similar
+tabla_pruebas = data
+tabla_pruebas[(tabla_pruebas$SaleCondition %in% c("Alloca", "Family", "Abnorml", "AdjLand")), ]$SaleCondition = "Group1"
+summary(lm(SalePrice ~ SaleCondition, tabla_pruebas))
+```
+
+Again number of observations in each category are very imbalanced. 82.05% of the houses belong to the category of Normal Sale. After grouping similar categories ('Alloca', 'Family', 'Abnorml' and 'AdjLand'), all the variables look significant. YES consider it.
+
+After completing the exploratory analysis of categorical variables, our objective is to conduct exploratory analysis on numeric variables.
+
+For that purpose, we use the next two functions and compute their correlations
+```{r}
+hist_plots_numerical = ListHistplotsNum(data = tabla_num)
+scat_plots_numerical = ListScatplotsNum(data = tabla_num)
+correlaciones = as.data.frame(cor(data[,c(col_types$numeric_cols)]))
+```
+
+(1) BsmtFinSF1: Type 1 finished square feet
+```{r,echo=FALSE}
+# Real numbers, high correlation, zeros, possible outlier(5644)
+
+GetHistNum(data,"BsmtFinSF1")
+sum(data$BsmtFinSF1==0)
+mean(data$BsmtFinSF1==0) # 31.98% of zeros
+
+plot(data$BsmtFinSF1, data$SalePrice) # possible outlier>5000
+cor(data$SalePrice,data$BsmtFinSF1) # Quite high cor=0.3720
+summary(lm(SalePrice ~ BsmtFinSF1, data)) # Low R-squared:  0.1384
+sort(data$BsmtFinSF1,decreasing = TRUE) # Large value found: 5644
+
+# Try removing the outlier
+data_filtered <- data[data$BsmtFinSF1 != 5644, ]
+plot(data_filtered$BsmtFinSF1, data_filtered$SalePrice) # It doesn't look linear
+cor(data_filtered$SalePrice,data_filtered$BsmtFinSF1) # cor=0.3906 increased a bit
+summary(lm(SalePrice ~ BsmtFinSF1, data_filtered)) # R-squared:  0.1526
+# After removing the outlier R^2 and correlation have changed slightly
+
+# Apply a transformation of square in the variable BsmtFinSF1
+summary(lm(SalePrice ~ I(BsmtFinSF1^2), data_filtered)) # Improved R-squared:  0.2013
+```
+
+The higher the Type 1 finished square feet, the more expensive. Directly related to the categorical variable *BsmtFinType1*. A priori, do NOT consider it. It is significant, but it doesn't explain much. It is highly correlated (cor=0.5223961) with TotalBsmtSF, which explains more about the response.
+
+(2) BsmtFinSF2: Type 2 finished square feet
+```{r,echo=FALSE}
+# Real numbers, high correlation, zeros
+
+GetHistNum(data,"BsmtFinSF2")
+sum(data$BsmtFinSF2==0)
+mean(data$BsmtFinSF2==0) # 88.56% of the values are 0
+
+plot(data$BsmtFinSF2, data$SalePrice)
+cor(data$SalePrice,data$BsmtFinSF2) # Very low correlation
+summary(lm(SalePrice ~ BsmtFinSF2, data)) # Very low R-squared:  2.335e-05
+```
+Looking at the scatter plot, it has not a significant impact on the response, the price remains constant even if the finished square feet of the Type 2 increases. It is directly related to the previous categorical *BsmtFinType2*. A priori, do NOT consider it. It is highly correlated with *TotalBsmtSF.*
+
+
+(3) BsmtUnfSF: Unfinished square feet of basement area
+```{r,echo=FALSE}
+# Real numbers, high correlation, zeros
+
+GetHistNum(data,"BsmtUnfSF")
+sum(data$BsmtUnfSF==0)
+mean(data$BsmtUnfSF==0) # 8.08% of zeros
+
+plot(data$BsmtUnfSF, data$SalePrice)
+cor(data$SalePrice,data$BsmtUnfSF) # cor=0.2144791
+summary(lm(SalePrice ~ BsmtUnfSF, data)) # Low R-squared:  0.04928
+```
+
+As we observe in the scatter plot the price does not change much with respect to the unfinished square feet of basement area, it remains quite constant. Besides, it is highly correlated with *TotalBsmtSF* (cor=0.4153596)  *TotalBsmtSF* has a higher correlation with the log SalePrice. It does not inform much. A priori, do NOT consider it.
+
+
+(4) TotalBsmtSF: Total square feet of basement area.
+```{r,echo=FALSE}
+# Real numbers, high correlation, zeros, possible outlier
+
+GetHistNum(data,"TotalBsmtSF")
+sum(data$TotalBsmtSF==0)
+mean(data$TotalBsmtSF==0) # 2.5% of zeros
+
+plot(data$TotalBsmtSF, data$SalePrice) # outlier around 6000
+cor(data$SalePrice,data$TotalBsmtSF) # High correlation cor=0.612
+summary(lm(SalePrice ~ TotalBsmtSF, data)) # R-squared:  0.3747
+
+# If we remove the possible outlier
+sort(data$TotalBsmtSF,decreasing = TRUE) # Large value found: 6110
+data_filtered <- data[data$TotalBsmtSF != 6110, ]
+plot(data_filtered$TotalBsmtSF, data_filtered$SalePrice)
+cor(data_filtered$SalePrice,data_filtered$TotalBsmtSF) # cor=0.64289 increased 
+summary(lm(SalePrice ~ TotalBsmtSF, data_filtered)) # R-squared:  0.4133 improved
+# After removing the outlier R^2 and correlation have both improved.
+```
+It has a high correlation (>0.6) with the log sale price and the R^2=0.4133 (without outlier) is considerably high also. The variable is very significant and it explains a lot. YES, consider it.
+
+
+(5) LotFrontage: Linear feet of street connected to property.
+```{r,echo=FALSE}
+# Real numbers, zeros, possible outlier
+
+GetHistNum(data,"LotFrontage")
+sum(data$LotFrontage==0)
+mean(data$LotFrontage==0) # 17.74% of zeros
+
+plot(data$LotFrontage, data$SalePrice) # two outliers around 300
+cor(data$SalePrice,data$LotFrontage) # cor=0.2096239
+summary(lm(SalePrice ~ LotFrontage, data)) # R-squared:  0.04329
+
+sort(data$LotFrontage,decreasing = TRUE) # Large values found: 313
+data_filtered <- data[data$LotFrontage != 313, ]
+data_filtered <- data[data$LotFrontage != 313, ]
+plot(data_filtered$LotFrontage, data_filtered$SalePrice)
+cor(data_filtered$SalePrice,data_filtered$LotFrontage) # cor=0.2152898 increased 
+summary(lm(SalePrice ~ LotFrontage, data_filtered)) # R-squared:  0.04635 improved
+# After removing the outlier R^2 and correlation have both improved (slightly).
+```
+This variable has many zeros (17.74%), coming from the NAs. However, it shows to be significant if we look at the p-value. It has two outliers taking the value 313. Removing the outliers the situation improves slightly, but the R^2 remains very low. YES, do NOT discard it.
+
+
+(6) LotArea: Lot size in square feet.
+```{r,echo=FALSE}
+# Real numbers, possible outlier
+
+GetHistNum(data,"LotArea")
+plot(data$LotArea, data$SalePrice) # Outliers on the RHS, especially one >200000
+cor(data$SalePrice,data$LotArea) # cor=0.2638434
+summary(lm(SalePrice ~ LotArea, data)) # R-squared:  0.06961
+
+sort(data$LotArea,decreasing = TRUE) # Large value found: 215245
+data_filtered <- data[data$LotArea != 215245, ]
+plot(data_filtered$LotArea, data_filtered$SalePrice)
+cor(data_filtered$SalePrice,data_filtered$LotArea) # cor=0.2726182 increased 
+summary(lm(SalePrice ~ LotArea, data_filtered)) # R-squared:  0.07432 improved
+# After removing the outlier R^2 and correlation have both improved (slightly).
+```
+In he scatter plot we can see some points very spread on the right-hand side, especially one of them (215245). The R^2 is quite low, so it does not explain much, but it seems to be significant. YES, do not discard it.
+
+
+(7) c3SsnPorch: Three season porch area in square feet
+```{r,echo=FALSE}
+# Real numbers, zeros
+
+hist_plots_numerical$c3SsnPorch
+scat_plots_numerical$c3SsnPorch
+gridExtra::grid.arrange(hist_plots_numerical$c3SsnPorch, scat_plots_numerical$c3SsnPorch)
+
+mean(data$c3SsnPorch == 0) # 98.35% of the values are zero
+
+summary(lm(SalePrice ~ c3SsnPorch, data))
+
+## Try to group them
+tabla_pruebas = data
+tabla_pruebas$c3SsnPorch = as.character(tabla_pruebas$c3SsnPorch)
+tabla_pruebas[!(tabla_pruebas$c3SsnPorch == "0"), ]$c3SsnPorch = "1"
+summary(lm(SalePrice ~ c3SsnPorch, tabla_pruebas))
+# Sigue siendo mala
+sort(correlaciones$`3SsnPorch`) # It doesn't have high correlation with any variable
+``` 
+It is significant, but it does not explain much variability. Also, 98.35% of the values are zeros. And it has no correlation with other variables. Do NOT consider it.
+
+
+(8) ScreenPorch: Three season porch area in square feet
+```{r,echo=FALSE}
+# Real numbers, zeros 
+
+hist_plots_numerical$ScreenPorch
+scat_plots_numerical$ScreenPorch
+gridExtra::grid.arrange(hist_plots_numerical$ScreenPorch, scat_plots_numerical$ScreenPorch)
+
+mean(data$ScreenPorch == 0) # 92.05% of the values are zero
+
+summary(lm(SalePrice ~ ScreenPorch, data))
+nrow(data[data$ScreenPorch == 0, ])
+## Try to group
+tabla_pruebas = data
+tabla_pruebas$ScreenPorch = as.character(tabla_pruebas$ScreenPorch)
+tabla_pruebas[!(tabla_pruebas$ScreenPorch == "0"), ]$ScreenPorch = "1"
+summary(lm(SalePrice ~ ScreenPorch, tabla_pruebas))
+# It explains little but is significant
+sort(correlaciones$ScreenPorch)
+correlaciones[,"ScreenPorch"]
+# It has no string correlations, only with Fireplace
+## Do not discard
+```
+In a similar way as in the previous, it is a significant variable but it does not explain much variability. Highly imbalanced, 92.05% of the values are zeros. YES, do not discard.
+
+
+(9) PoolArea: Pool area in square feet
+```{r,echo=FALSE}
+# Real numbers, zeros
+
+# 3.3.a) Histogram
+hist_plots_numerical$PoolArea
+# 3.3.b) Scatterplot
+scat_plots_numerical$PoolArea
+gridExtra::grid.arrange(hist_plots_numerical$PoolArea, scat_plots_numerical$PoolArea)
+
+summary(lm(SalePrice ~ PoolArea, data))
+mean(data$PoolArea == 0) # 99.52% of zeros
+tabla_pruebas = data
+tabla_pruebas$PoolArea = as.character(tabla_pruebas$PoolArea)
+tabla_pruebas[!(tabla_pruebas$PoolArea == "0"), ]$PoolArea = "1"
+summary(lm(SalePrice ~ PoolArea, tabla_pruebas))
+# It does not explain much, but it is significant
+sort(correlaciones$PoolArea)
+```
+Most of the values are zeros (99.52%) and for the rest of the cases the price of the house does not change much. In addition, it does not explain much. Do NOT consider it.
+
+
+(10) GarageArea: Size of garage in square feet
+```{r,echo=FALSE}
+#zeros
+sum(data$GarageArea==0)
+mean(data$GarageArea==0) # 5.5% of the values are 0
+# Histogram
+hist_plots_numerical$GarageArea
+# Scatterplot
+scat_plots_numerical$GarageArea
+gridExtra::grid.arrange(hist_plots_numerical$GarageArea, scat_plots_numerical$GarageArea)
+cor(data$SalePrice,data$GarageArea) # cor=0.6234314
+summary(lm(SalePrice ~ GarageArea, data)) # High R-squared:  0.3887
+```
+It is significant and the R^2 value is high. From the scatter plot we can see the higher the garage area, the more expensive.However, it is directly related to the categorical variable *GarageCars*, which we have decides to consider in the model. A priori, do NOT consider it.
+
+(11) WoodDeckSF: Wood deck area in square feet
+```{r,echo=FALSE}
+#zeros
+sum(data$WoodDeckSF==0)
+mean(data$WoodDeckSF==0) # 52'1% of the values are 0
+# Histogram
+hist_plots_numerical$WoodDeckSF
+# Scatterplot
+scat_plots_numerical$WoodDeckSF
+gridExtra::grid.arrange(hist_plots_numerical$WoodDeckSF, scat_plots_numerical$WoodDeckSF)
+cor(data$SalePrice,data$WoodDeckSF)
+summary(lm(SalePrice ~ WoodDeckSF, data))
+```
+Although the percentage of 0s is high (52'1%), it is significant and the R^2 value is not low. From the scatter plot we can see that the more wood deck area, the more expensive. A priori, YES consider it.
+
+(12) OpenPorchSF: Open porch area in square feet
+```{r,echo=FALSE}
+#zeros
+sum(data$OpenPorchSF==0)
+mean(data$OpenPorchSF==0) # 44'93% of the values are 0
+# Histogram
+hist_plots_numerical$OpenPorchSF
+# Scatterplot
+scat_plots_numerical$OpenPorchSF
+gridExtra::grid.arrange(hist_plots_numerical$OpenPorchSF, scat_plots_numerical$OpenPorchSF)
+cor(data$SalePrice,data$OpenPorchSF)
+summary(lm(SalePrice ~ OpenPorchSF, data))
+```
+It is significant, and the R^2 value is not quite low. It has a high percentage of 0s (44.93%) From the scatter plot we can see in the left part it follows a linear relationship, although it gets worse in the right side. There are some outliers points. A priori, YES consider it
+
+(13) 1stFlrSF: First Floor square feet
+```{r,echo=FALSE}
+# Histogram
+hist_plots_numerical$FstFlrSF
+# Scatterplot
+scat_plots_numerical$FstFlrSF
+gridExtra::grid.arrange(hist_plots_numerical$FstFlrSF, scat_plots_numerical$FstFlrSF)
+cor(data$SalePrice,data$FstFlrSF)
+summary(lm(SalePrice ~ FstFlrSF, data))
+```
+It is significant, and the R^2 value is  quite high. From the scatter plot we can see it follows a good linear relationship. There is an outlier. A priori, YES consider it
+
+(14) 2ndFlrSF: Second Floor square feet
+```{r,echo=FALSE}
+#zeros
+sum(data$SndFlrSF==0)
+mean(data$SndFlrSF==0) # 56'7% of the values are 0
+# Histogram
+hist_plots_numerical$SndFlrSF
+# Scatterplot
+scat_plots_numerical$SndFlrSF
+gridExtra::grid.arrange(hist_plots_numerical$SndFlrSF, scat_plots_numerical$SndFlrSF)
+cor(data$SalePrice,data$SndFlrSF)
+summary(lm(SalePrice ~ SndFlrSF, data))
+```
+It is significant, and the R^2 value is  not slow. From the scatter plot we can see it follows a good linear relationship, the more second floor square feet, the more expensive.Although it has a great percentage of 0s. A priori, YES consider it
+
+(15) LowQualFinSF: Low quality finished square feet (all floors)
+```{r,echo=FALSE}
+#zeros
+sum(data$LowQualFinSF==0)
+mean(data$LowQualFinSF==0) # 98'2% of the values are 0
+# Histogram
+hist_plots_numerical$LowQualFinSF
+# Scatterplot
+scat_plots_numerical$LowQualFinSF
+gridExtra::grid.arrange(hist_plots_numerical$LowQualFinSF, scat_plots_numerical$LowQualFinSF)
+cor(data$SalePrice,data$LowQualFinSF)
+summary(lm(SalePrice ~ LowQualFinSF, data))
+```
+It is not significant and the R^2 value is very low. Almost all the observations are 0s (98.2%). It does not say anything about the price. Do NOT consider it.
+
+(16) GrLivArea: Above grade (ground) living area square feet
+```{r,echo=FALSE}
+# Histogram
+hist_plots_numerical$GrLivArea
+# Scatterplot
+scat_plots_numerical$GrLivArea
+gridExtra::grid.arrange(hist_plots_numerical$GrLivArea, scat_plots_numerical$GrLivArea)
+cor(data$SalePrice,data$GrLivArea)
+summary(lm(SalePrice ~ GrLivArea, data))
+```
+It is significant, and the R^2 value is  very high. From the scatter plot we can see it follows a good linear relationship, the more above grade (ground) living area square feet, the more expensive. High correlation with SalePrice (0.7). We decide YES consider it.
+
+(17) MasVnrArea: Masonry veneer area in square feet
+```{r,echo=FALSE}
+#zeros
+sum(data$MasVnrArea==0)
+mean(data$MasVnrArea==0) # 59.5% of the values are 0
+# Histogram
+hist_plots_numerical$MasVnrArea
+# Scatterplot
+scat_plots_numerical$MasVnrArea
+gridExtra::grid.arrange(hist_plots_numerical$MasVnrArea, scat_plots_numerical$MasVnrArea)
+cor(data$SalePrice,data$GrLivArea)
+summary(lm(SalePrice ~ MasVnrArea, data))
+```
+It is significant, and the R^2 value is not low. It has a high percentage of 0s (59.5%) From the scatter plot we can see in the left part it follows a linear relationship, although it gets worse in the right side. There are some outliers points. A priori, YES consider it.
+
+(18) MiscVal: $Value of miscellaneous feature
+```{r,echo=FALSE}
+# Real numbers, zeros
+
+# 3.4.a) Histogram
+hist_plots_numerical$MiscVal
+# 3.4.b) Scatterplot
+scat_plots_numerical$MiscVal
+gridExtra::grid.arrange(hist_plots_numerical$MiscVal, scat_plots_numerical$MiscVal)
+
+mean(data$MiscVal==0) # 96.43% of zeros
+
+summary(lm(SalePrice ~ MiscVal, data))
+```
+
+Highly imbalanced. Most of the values are concentrated in the right hand side and there are few observation that are very spread, probably outliers. There is also a large amount of zeros (96.43%). In addition, the adjusted R^2 is negative which means that even an horizontal line is a better approach. These show evidences that this variable should NOT be considered.
+
+## Transformations
+
+# From categorical to numeric
+
+There are some particular categorical variables that could also make sense to consider them as numeric. This happens when categories are ordered in some way. And in the case where the relation with these categories and the response variable looked linear, we decided to take the variables as numeric. This gives us a better understanding of the relation with the response and it allows us to analyze the correlations.
+
+YearBuilt: Original construction date
+
+```{r}
+
+# Categorical, high correlation -> Numeric
+
+bar_plots_categorical$YearBuilt
+box_plots_categorical$YearBuilt
+gridExtra::grid.arrange(bar_plots_categorical$YearBuilt, box_plots_categorical$YearBuilt)
+
+cor(data$SalePrice,as.numeric(data$YearBuilt), use = "complete.obs") # cor=0.5865702
+# It makes sense to consider the categorical variable as numeric, as it is chronologically ordered
+summary(lm(SalePrice ~ as.numeric(data$YearBuilt), data)) # R-squared:  0.3441
+```
+If we convert YearBuilt to numeric, we see that it is higly correlated with the transformed response. Also, we obtain a high R^2=0.3441 and a low p-value, showing it is a significant variable. YES consider it.
+
+On the one hand, some of these variables refer to dates, so it makes sense to order them chronologically and analyze its effect on the response, SalePrice. On the other hand, other variables inform about the quality or condition of some parts of the house, whose categories can also be ordered from the best level (excellent), to the worst (poor). And in the case also, we have considered the variables that showed a linear relation with the response, the worse the quality the cheaper the house will be.
+
+BsmtQual: Evaluates the height of the basement
+```{r}
+# Ex	Excellent (100+ inches)	
+# Gd	Good (90-99 inches)
+# TA	Typical (80-89 inches)
+# Fa	Fair (70-79 inches)
+# Po	Poor (<70 inches
+# NA	No Basement
+
+# Categorical, high correlation, missing values -> Numeric
+
+# We first want to order the values, as it is an ordinary categorical variable
+order <- c("Ex", "Gd", "TA", "Fa", "Po", "NB")
+data$BsmtQual <- factor(data$BsmtQual, levels=order)
+
+barplot(table(data$BsmtQual))
+GetBoxPlotCat(data,"BsmtQual")
+sum(is.na(data$BsmtQual))
+mean(is.na(data$BsmtQual))
+# 2.5% of NA (NA represents No basement, not missing value)
+
+data[is.na(data$BsmtQual),]$BsmtQual = "NB"
+
+cor(data$SalePrice,as.numeric(data$BsmtQual), use = "complete.obs") # cor=-0.6535098
+# It makes sense to consider the categorical variable as numeric, as it is ordinal.
+# We obtain the that there is a high negative correlation which means the worse the 
+# height of the basement is, the lower the price will be.
+summary(lm(SalePrice ~ as.numeric(data$BsmtQual), data)) # R-squared:  0.4354
+```
+Looking at the boxplots we can observe a linear relation between the variable and the transformed response. In this case, as we consider the variable as numeric, we can compute the correlation and see that there is a high correlation and it is negative, cor=-0.6535098. This shows that worse the height of the basement is, the lower the price will be. Also, it is very significant and  the R^2 is quite high in comparison with previous ones. YES, consider it.
+
+
+HeatingQC: Heating quality and condition
+
+```{r}
+# Ex	Excellent
+# Gd	Good
+# TA	Average/Typical
+# Fa	Fair
+# Po	Poor
+
+# Categorical -> Numeric
+
+# Choose the levels of the categorical ordinal variable
+order <- c("Ex", "Gd", "TA", "Fa", "Po")
+data$HeatingQC <- factor(data$HeatingQC, levels=order)
+
+barplot(table(data$HeatingQC)) # No symmetry
+GetBoxPlotCat(data,"HeatingQC")
+
+cor(data$SalePrice,as.numeric(data$HeatingQC), use = "complete.obs") # cor=-0.4737617
+# It makes sense to consider the categorical variable as numeric, as it is ordinal.
+summary(lm(SalePrice ~ as.numeric(data$HeatingQC), data)) # Low R-squared:  0.2335
+```
+In the same way as the previous case, we turn the variable into numeric, as it it a ordinal categorical. Looking the boxplots we observe a linear relation with the transformed response. It is highly negatively correlated with cor=-0.4737617. In addition, it is very significant. YES, consider it as numeric.
+
+
+ExterCond: Evaluates the present condition of the material on the exterior
+```{r}
+#Ex	Excellent
+#Gd	Good
+#TA	Average/Typical
+#Fa	Fair
+#Po	Poor
+
+order <- c("Ex", "Gd", "TA", "Fa", "Po")
+data$ExterCond <- factor(data$ExterCond, levels=order)
+
+barplot(table(data$ExterCond)) # Quite symmetric
+GetBoxPlotCat(data,"ExterCond")
+
+summary(lm(SalePrice ~ ExterCond, data))
+```
+In this case, the relation between the variable and the transformed response is not so linear. In the first three levels (Excellent, Good, Average) the price stays quite stable, while when it keeps worsening the price starts dropping in a more linearly. So in this case it is not beneficial to convert it from categorical into numeric.
+
+
+KitchenQual: Kitchen quality
+```{r}
+#Ex	Excellent
+#Gd	Good
+#TA	Typical/Average
+#Fa	Fair
+#Po	Poor
+
+order <- c("Ex", "Gd", "TA", "Fa", "Po")
+data$KitchenQual <- factor(data$KitchenQual, levels=order)
+
+barplot(table(data$KitchenQual)) # Quite symmetry
+GetBoxPlotCat(data,"KitchenQual")
+
+cor(data$SalePrice,as.numeric(data$KitchenQual)) # cor=-0.667893
+
+summary(lm(SalePrice ~ as.numeric(KitchenQual), data))
+```
+Again it seems to appear a linear relation between the categories and transformed response. It makes sense to consider it as numeric as the categories can be ordered. If we take it as a numeric variable, we obtain a strong negative correlation of cor=-0.667893, which shows that there is a linear relation between the quality of the kitchen and the log of the house price. YES, we will consider this variable as numeric.
+
+# New variables created
+
+Some variables have been created from the original variables to summarize or provide new information. These variables are:
+
+* prop_uf: It is a proportion of the unfinished space of the basement.
+* total_bath: It contains all the bathrooms, whether they are in the basement or not or they are full or not.
+* hay_piscina: It contains information on whether the house has a pool or not. It is based on the variable PoolQC when it does not take NA values.
+
+These variables are included in the model and they have proven through the stepAIC and ANOVA to be meaningful.
+
+
+# Range of the new observation
+
+As our objective is to predict the *SalePrice* of other houses, we need to make sure that we are able to apply our model to the new data. For that purpose, we need to make sure that the ranges of the values of the new data (test_data) are included in the data we used to build the model (train_data). In order to do that, we go through the ranges of the variables of each value and check if it is satisfied.
+
+First we compute the ranges of the train dataset.
+```{r}
+range_values <- numeric(length(tabla_num))
+for (i in 1:24) {
+  col_range <- range(tabla_num[, i], na.rm = TRUE)
+  range_values[i] <- diff(col_range)
+  col_name <- colnames(tabla_num)[i]
+  cat("Range for Column", col_name, ":", col_range[1], "to", col_range[2], "\n")
+}
+```
+
+In the following we repeat the same process but with the train dataset.
+```{r}
+test_data <- read.csv("test.csv")
+col_types_test = GetColumnsTypes(test_data)
+categorical <- col_types_test$character_cols
+indices <- 1:80
+ind_num <- indices[-categorical]
+numeric_var_test <- test_data[,ind_num]
+
+range_values <- numeric(length(numeric_var_test))
+for (i in 1:37) {
+  col_range <- range(numeric_var_test[, i], na.rm = TRUE)
+  range_values[i] <- diff(col_range)
+  col_name <- colnames(numeric_var_test)[i]
+  cat("Range for Column", col_name, ":", col_range[1], "to", col_range[2], "\n")
+}
+```
+
+To sum up, we can reduce all these ranges to the particular cases where this condition is not fulfilled:
+
+TotRmsAbvGrd (test: 3 to 15 and train: 2 to 14) -> 1 time
+FullBath (test: 0 to 4 and train: 0 to 3) -> 4 times
+GarageCars (test: 0 to 5 and train: 0 to 4) -> 1 time
+
+X1stFlrSF  (test: 407 to 5095 and train: 334 to 4692) 
+
+We can see that for categorical we have 3 variables, but in all the cases the value in the test dataset is out of the range just for one unit. For instance, looking at *GarageCars* our train model is only considering houses with Garages including from 0 to 4 cars, however our dataset contains a house with garage for 5 cars. In a similar way, for numeric variables this condition is not true for the variable *X1stFlrSF*. Looking closer, we see that there is only one observation in the test dataset (5095) out of the train. This point deviates from the training dataset by less than 10%. We see that the percentage of variability is not significant and it occurs in very few observations. Consequently, we have chosen to assume the risk. In practice, this means that despite the presence of variables in the test dataset that fall outside the training dataset, we will proceed with using our model, trained exclusively on the training data, to make predictions on the test data.
+
+
+# Tuning the model through various methods
+
+Through the exploratory analysis, we have been able to determine the variables that should not be included in the model due to diverse factors. However, we still count with too many variables, so we would like to reduce more the total number of variables present in the model. One way to reduce this more in order to make a simpler model is to use the StepAIC function in MASS. This function looks for the simplest way to fit the model correctly. This is done by trying to minimize the Akaike Information Criterion (AIC). From this, we create a new model with less parameters:
+
+```{r}
+datos_train_mod = data
+datos_train_mod$Condition2 = NULL
+datos_train_mod$MiscFeature = NULL
+datos_train_mod$BsmtHalfBath = NULL
+datos_train_mod$KitchenAbvGr = NULL
+datos_train_mod$BsmtFinType2 = NULL
+datos_train_mod$Street = NULL
+datos_train_mod$Utilities = NULL
+datos_train_mod$LandSlope = NULL
+datos_train_mod$RoofMatl = NULL
+datos_train_mod$BsmtCond = NULL
+datos_train_mod$Heating = NULL
+datos_train_mod$Electrical = NULL
+datos_train_mod$BsmtFullBath = NULL
+datos_train_mod$Functional = NULL
+datos_train_mod$GarageQual = NULL
+datos_train_mod$GarageCond = NULL
+datos_train_mod$PavedDrive = NULL
+datos_train_mod$GarageYrBlt = NULL
+```
+
+
+```{r, warning= FALSE,message = FALSE}
+#mod0 = lm(SalePrice~., datos_train_mod)
+#mod0.aic=stepAIC(mod0, direction="both",trace=FALSE)
+```
+
+```{r, warning= FALSE,message = FALSE}
+#mod0.aic$anova$Step
+```
+
+We see that most of the variables removed do not seem very relevant to determine the SalePrice, so it makes sense that the stepAIC decides to remove them. However, there are three variables that seem important both from a logical point of view and from the exploratory analysis point of view. These three variables are GrLivArea (Living are of the house not counting basement) and TotalBsmtSF (Square feet of the basement). When improving the model, we will still keep these these variables just in case while removing the rest.
+
+We now look at some of the parameters of this first model:
+
+```{r, warning= FALSE,message = FALSE}
+#summary(mod0.aic)$adj.r.squared
+```
+
+We see that the adjusted R^2 is already very good, although this is still not definite proof that the model fits well the data. We could check the RMSE and the tests for this model, but as this is just a first model iteration, we will choose not to, in order to not make the work too long.
+
+
+Through various analyzing processes such as ANOVA, we have built a new model removing some more variables. This new model is:
+
+
+```{r, echo=FALSE,warning= FALSE,message = FALSE}
+library(gridExtra)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(ggplot2)
+library(car)
+library(mgcv)
+library(knitr)
+library(broom)
+
+# 0. Funciones
+TransformacionesVariables = function(data, type = "train"){
+  if (type == "train"){
+    data$SalePrice = log(data$SalePrice)
+  }
+  # Tratamiento de NA
+  # BsmtQual if NA means no basement
+  data[is.na(data$BsmtQual),]$BsmtQual = "No_basement"
+  # Fence if NA means no basement
+  data[is.na(data$Fence),]$Fence = "No_fence"
+  # MiscFeature if NA means no basement
+  data[is.na(data$MiscFeature),]$MiscFeature = "None"
+  # BsmtCond if NA means no basement
+  data[is.na(data$BsmtCond),]$BsmtCond = "No_basement"
+  # BsmtFinType1 if NA means no basement
+  data[is.na(data$BsmtFinType1),]$BsmtFinType1 = "No_basement"
+  # BsmtFinType2 if NA means no basement
+  data[is.na(data$BsmtFinType2),]$BsmtFinType2 = "No_basement"
+  # Hay 8 observaciones con variable MasVnrArea a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$MasVnrArea),]$MasVnrArea = 0
+  # Hay muchas observaciones con variable LotFrontage a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$LotFrontage),]$LotFrontage = 0
+  # Hay 8 observaciones con variable MasVnrArea a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$MasVnrType),]$MasVnrType = 0
+  # Alley if NA means no access
+  data[is.na(data$Alley),]$Alley = "No_access"
+  # FireplaceQu if NA means no access
+  data[is.na(data$FireplaceQu),]$FireplaceQu = "No_Fireplace"
+  # GarageType if NA means no access
+  data[is.na(data$GarageType),]$GarageType = "No_Garage"
+  # GarageFinish if NA means no access
+  data[is.na(data$GarageFinish),]$GarageFinish = "No_Garage"
+  # GarageQual if NA means no access
+  data[is.na(data$GarageQual),]$GarageQual = "No_Garage"
+  # GarageCond if NA means no access
+  data[is.na(data$GarageCond),]$GarageCond = "No_Garage"
+  # BsmtExposure if NA means no access
+  data[is.na(data$BsmtExposure),]$BsmtExposure = "No_basement"
+  # PoolQC if NA means no pool
+  data[is.na(data$PoolQC),]$PoolQC = "No_Pool"
+  # GarageYrBlt if NA 0?
+  data[is.na(data$GarageYrBlt),]$GarageYrBlt = 0
+  data = VarTypeFix(data)
+  # Transformaciones a factor
+  data$MSSubClass = as.factor(data$MSSubClass)
+  # Transformaciones a numeric
+  data$GarageCars = as.numeric(data$GarageCars)
+  data$Fireplaces = as.numeric(data$Fireplaces)
+  data$YearBuilt = as.numeric(data$YearBuilt)
+  data$KitchenQual = factor(data$KitchenQual, levels = c("Ex", "Gd", "TA", "Fa", "Po"))
+  data$KitchenQual = as.numeric(data$KitchenQual)
+  data$OverallCond = as.numeric(data$OverallCond)
+  # Transformaciones a logaritmo
+  data$GrLivArea = log(data$GrLivArea)
+  data$LotArea = log(data$LotArea)
+  
+
+  data$BsmtUnfSF[is.na(data$BsmtUnfSF)] = mean(data$BsmtUnfSF, na.rm = T)
+  data$TotalBsmtSF[is.na(data$TotalBsmtSF)] = mean(data$TotalBsmtSF, na.rm = T)
+  data$GarageCars[is.na(data$GarageCars)] = mean(data$GarageCars, na.rm = T)
+  # Variables de proporcion de metros del basement construidos
+  data$prop_1 = data$BsmtFinSF1 / (data$TotalBsmtSF +0.1)
+  data$prop_2 = data$BsmtFinSF2/ (data$TotalBsmtSF +0.1)
+  data$prop_uf = data$BsmtUnfSF/ (data$TotalBsmtSF +0.1)
+  data$prop_3 = (data$BsmtFinSF1 + data$BsmtFinSF2)/ (data$TotalBsmtSF +0.1)
+  
+  # Variables de proporcion de metros de casa construidos
+  data$cas_1 = data$X1stFlrSF / (data$GrLivArea)
+  data$cas_2 = data$X2ndFlrSF/ (data$GrLivArea)
+  data$cas_low = data$LowQualFinSF/ (data$GrLivArea)
+  # 
+  data$Exists_2nd_floor = 0
+  data$Exists_2nd_floor[data$X2ndFlrSF > 1] <- 1
+  data$Exists_2nd_floor = as.factor(data$Exists_2nd_floor)
+  
+  data$SaleCondition[(data$SaleCondition %in% 
+                                   c("AdjLand",
+                                     "Alloca",
+                                     "Family"))] <- "Other"
+  
+  data$BsmtFullBath[is.na(data$BsmtFullBath)] = 0
+  data$BsmtHalfBath[is.na(data$BsmtHalfBath)] = 0
+  data$FullBath[is.na(data$FullBath)] = 0
+  data$HalfBath[is.na(data$HalfBath)] = 0
+  
+  data$total_bath =
+    as.numeric(data$BsmtFullBath )+
+    as.numeric(data$BsmtHalfBath )+
+    as.numeric(data$FullBath )+
+    as.numeric(data$HalfBath)
+  
+  data$hay_piscina = "0"
+  data$hay_piscina[!(data$PoolQC == "No_Pool")] = "1"
+  
+  data$KitchenQual[is.na(data$KitchenQual)] = getmode(data$KitchenQual)
+  data$MSZoning[is.na(data$MSZoning)] = getmode(data$MSZoning)
+  data$GarageFinish[is.na(data$GarageFinish)] = getmode(data$GarageFinish)
+  
+  
+  return(data)
+}
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+GraficosModelo = function(modelo){
+  # Fitted vs real data
+  residuos_modelo = modelo$modelo_final$residuals
+  fitted = modelo$modelo_final$fitted.values
+  fit_vs_res = data.frame(
+    "log_sales_price" = modelo$modelo_final$model$.outcome,
+    "fitted" = fitted)
+  fit_vs_res = fit_vs_res[order(fit_vs_res$log_sales_price),]
+  fit_vs_res$ordered_data = 1:nrow(fit_vs_res)
+  fitted_vs_res_graph <- 
+    ggplot() +
+    geom_line(data = fit_vs_res, aes(x = ordered_data, y = fitted, color = "Fitted")) +
+    geom_line(data = fit_vs_res, aes(x = ordered_data, y = log_sales_price, color = "Log Sales Price")) +
+    theme_minimal() +
+    labs(color = "", y = "Log of Dollars") +  # Set legend title to an empty string and y-axis label
+    scale_x_discrete(name = NULL) +  # Set x-axis label to NULL
+    theme(legend.position = "right")
+  
+  fit_vs_res_dol = data.frame(
+    "log_sales_price" = exp(modelo$modelo_final$model$.outcome),
+    "fitted" = exp(fitted))
+  
+  fit_vs_res_dol = fit_vs_res_dol[order(fit_vs_res_dol$log_sales_price),]
+  fit_vs_res_dol$ordered_data = 1:nrow(fit_vs_res_dol)
+  fitted_vs_res_graph_dol <- 
+    ggplot() +
+    geom_line(data = fit_vs_res_dol, aes(x = ordered_data, y = fitted, color = "Fitted")) +
+    geom_line(data = fit_vs_res_dol, aes(x = ordered_data, y = log_sales_price, color = "Log Sales Price")) +
+    theme_minimal() +
+    labs(color = "", y = "Dollars") +  # Set legend title to an empty string and y-axis label
+    scale_x_discrete(name = NULL) +  # Set x-axis label to NULL
+    theme(legend.position = "right")
+  
+  linearity_res = Linearity(residuos_modelo, fitted)
+  
+  residuos =data.frame(residuos_modelo)
+  colnames(residuos) = c("Residuos")
+  
+  resid_hist = ggplot(residuos, aes(x = Residuos)) +
+    geom_histogram(fill = "#4e79a7", color = "#d53e4f", bins = 30, alpha = 0.7) +
+    labs(title = "Distribution of Residuals",
+         x = "Residuals",
+         y = "Frequency") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.text = element_text(size = 10),
+          axis.title = element_text(size = 12, face = "bold"))
+  
+  residuos$Id = 0
+  residuos = residuos[order(residuos$Residuos),]
+  residuos$Id = 1:nrow(residuos)
+  
+  qqplot_resid = ggplot(residuos, aes(x = Id, y = Residuos)) +
+    geom_point(color = "steelblue", size = 1, alpha = 0.7) +
+    
+    # Add titles and labels
+    ggtitle("Scatter Plot of Residuals") +
+    xlab("ID") +
+    ylab("Residuals") +
+    
+    # Customize theme
+    theme_minimal() +  # You can choose other themes based on your preference
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.text = element_text(size = 10),
+          axis.title = element_text(size = 12, face = "bold"),
+          legend.position = "none")
+  salida_graficos = list(
+    # QQplot
+    fitted_vs_res_graph = fitted_vs_res_graph,
+    linearity_res = linearity_res,
+    fitted_vs_res_graph_dol = fitted_vs_res_graph_dol,
+    resid_hist = resid_hist,
+    qqplot_resid = qqplot_resid
+  )
+}
+
+VarTypeFix = function(datos){
+  # We convert the factors that have been taken as numeric by R
+  selected_cols = c('OverallQual','OverallCond','BsmtFullBath','BsmtHalfBath','FullBath',
+                    'HalfBath','BedroomAbvGr','KitchenAbvGr', 'TotRmsAbvGrd', 'Fireplaces',
+                    'GarageCars','YrSold','MoSold')
+  datos[, selected_cols] <- lapply(datos[, selected_cols], as.factor)
+  return(datos)
+}
+
+Linearity = function(residuos_modelo,fitted){
+  table = data.frame(residual = residuos_modelo, fitted = fitted)
+  Plot = ggplot(table, aes(fitted, residual)) + geom_point() + geom_smooth() + geom_hline(aes(yintercept = 0)) + 
+    theme(panel.grid = element_blank(), panel.background = element_blank())
+
+}
+
+CalculateModel = function(data, seeds = c(100, 14, 423, 4124, 58, 145, 50, 30, 67, 12)){
+  seeds_cv = seeds
+  
+  resultados = data.frame(
+    matrix(nrow = length(seeds_cv),
+           ncol = 5)
+  )
+  colnames(resultados) = c(
+    "Semilla",
+    "MSE",
+    "MAE",
+    "RMSE",
+    "AIC")
+  resultados_dol =resultados
+  objetos_modelo = vector("list", length = length(seeds_cv))
+  
+    
+  set.seed(100)
+  particion = caret::createDataPartition(data$Id, 
+                                         p = 0.8, 
+                                         list = FALSE,
+                                         times = 1)
+  # Crear dataframes de testing y training
+  training_data <- data[data$Id %in% particion, ]
+  testing_data <- data[!(data$Id %in% particion), ]
+  
+  fitControl <- caret::trainControl(
+    method = "repeatedcv",
+    number = 10,
+    repeats = 10)
+  # Entrenamiento del modelo
+
+  modelo <- caret::train(
+    SalePrice ~
+      KitchenQual +
+      LotArea +
+      Fireplaces +
+      Exists_2nd_floor +
+      CentralAir +
+      GarageCars:GarageFinish +
+      prop_uf +# Mejoran metrica pero son raras
+      hay_piscina +
+      SaleCondition +
+      YearBuilt +
+      Neighborhood +
+      ScreenPorch + 
+      total_bath + 
+      WoodDeckSF +
+      MSZoning +
+      MSSubClass +
+      GrLivArea:OverallQual+
+      Condition1 +
+      OverallCond +
+      BsmtFinType1, 
+    data = training_data, 
+    method = "lm", 
+    trControl = fitControl,
+    verbose = FALSE)
+  
+  # Calculo del modelo
+ 
+  # prediccion = stats::predict.bam(modelo,newdata =  testing_data)
+  prediccion = stats::predict(modelo,newdata =  testing_data)
+  
+  resultados_sim = data.frame(
+    "MSE" = mean((as.vector(prediccion)-testing_data$SalePrice)^2),
+    "MAE" = mean(abs(as.vector(prediccion)-testing_data$SalePrice)),
+    "RMSE" = sqrt(mean((as.vector(prediccion)-testing_data$SalePrice)^2)),
+    "AIC" = AIC( modelo$finalModel)
+  )
+  
+  resultados_sim_dol = data.frame(
+    "MSE" = mean((exp(prediccion)-exp(testing_data$SalePrice))^2),
+    "MAE" = mean(abs(exp(prediccion)-exp(testing_data$SalePrice))),
+    "RMSE" = sqrt(mean((exp(prediccion)-exp(testing_data$SalePrice))^2)),
+    "AIC" = AIC( modelo$finalModel)
+  )
+  
+  salidas_modelo = list(
+    modelo = modelo,
+    prediccion = prediccion,
+    resultados_sim = resultados_sim,
+    resultados_sim_dol = resultados_sim_dol
+  )
+
+return(list(
+  modelo_final = modelo$finalModel,
+  resultados_modelo = rbind(resultados_sim, resultados_sim_dol)
+  ))
+}
+
+
+##########################################################################
+############################## MODELIZACION ##############################
+##########################################################################
+
+path = 
+datos_train = read.csv("train.csv")
+
+datos_test = read.csv("test.csv")
+
+source("functions.R")
+
+attach(datos_train)
+# Particion de datos y crossed validation
+datos_train = TransformacionesVariables(datos_train)
+datos_test = TransformacionesVariables(datos_test, "test")
+# Exclusion de valor outlier
+datos_train = datos_train[datos_train$LotArea != max(datos_train$LotArea), ]
+
+#### CV
+modelo_final = CalculateModel(datos_train)
+graficos_modelo = GraficosModelo(modelo_final)
+
+formula_final = formula(modelo_final$modelo_final)
+formula_final[2] = "SalePrice"
+
+
+fitControl <- caret::trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 10)
+# Entrenamiento del modelo
+# Creamos un modelo dummy para que formatee las variables categoricas de la misma manera en train y test
+modelo2 <- caret::train(
+  Id ~
+    KitchenQual +
+    LotArea +
+    Fireplaces +
+    Exists_2nd_floor +
+    CentralAir +
+    GarageCars:GarageFinish +
+    prop_uf +# Mejoran metrica pero son raras
+    hay_piscina +
+    SaleCondition +
+    YearBuilt +
+    Neighborhood +
+    ScreenPorch + 
+    total_bath + 
+    WoodDeckSF +
+    MSZoning +
+    MSSubClass +
+    GrLivArea:OverallQual+
+    Condition1 +
+    OverallCond +
+    BsmtFinType1, 
+  data = datos_test, 
+  method = "lm", 
+  trControl = fitControl,
+  verbose = FALSE)
+
+
+prediccion_datos = predict(modelo_final$modelo_final, newdata =  modelo2$finalModel$model)
+
+datos_fin =exp(prediccion_datos)
+write.csv(datos_fin, "datos_fin.csv")
+
+# 5. Render
+# Aqui hay que meter los objetos
+objets_markdown = list(
+  graphs = graficos_modelo,
+  modelo = modelo_final,
+  formula_final = formula_final,
+  summary = tidy(modelo_final$modelo_final)
+  # ,out_mod = gamtabs(modelo_final$modelo_final)
+)
+
+
+
+
+# Here you must set all the options needed and load the libraries needed
+graphs <- objets_markdown$graphs
+modelo <- objets_markdown$modelo
+formula_final = objets_markdown$formula_final
+#out <- params$reporting$out_mod
+# Other instructions:
+# > &nbsp; is used to insert a page break
+# $~$ is used to insert a blank space (for example space between a table and some text)
+```
+
+
+
+
+
+```{r, warning= FALSE,message = FALSE}
+
+
+modelo0=lm(SalePrice ~
+  KitchenQual +
+  LotArea +
+  #BsmtCond +
+  Fireplaces +
+  
+  CentralAir +
+  GarageCars:GarageFinish +
+  prop_uf +# Mejoran metrica pero son raras
+  cas_low+ # Mejoran metrica pero son raras
+  hay_piscina +
+  SaleCondition +
+  YearBuilt +
+  Exists_2nd_floor +
+  Neighborhood +
+  ScreenPorch + # Anova dice de quitarla pero empeora un poco la metrica
+  total_bath + 
+  WoodDeckSF +
+  MSZoning +
+  MSSubClass +
+  GrLivArea+OverallQual+
+  #s(GrLivArea, bs = "ps", m = 2, k = 4, by = OverallQual)+
+  Condition1 +
+  OverallCond +
+  BsmtFinType1 +
+  #s(TotalBsmtSF, bs = "ps", m = 2, k = 4) +
+  Functional, data=datos_train)
+```
+
+We try stepAIC on this model. 
+
+```{r, echo=FALSE,warning= FALSE,message = FALSE}
+stepAIC(modelo0,direction="both")
+```
+
+"cas_low" has the lowest AIC, meaning that the amount of information lost by removing "cas_low" is minimum.  The algorithm removes "cas_low" and run stepAIC with  the remaining set of variables.
+The plus sign in front of "cas_low" tells that in subsequent iteration, it has also checked
+by adding the removed variable again if it increases the AIC 
+the final model we obtain is the following:
+
+```{r, echo=FALSE,warning= FALSE,message = FALSE}
+modelo1=lm(formula = SalePrice ~ KitchenQual + LotArea + Fireplaces + 
+      Exists_2nd_floor + CentralAir + prop_uf + hay_piscina + SaleCondition + 
+      YearBuilt + Neighborhood + ScreenPorch + total_bath + WoodDeckSF + 
+      MSZoning + MSSubClass + GrLivArea + OverallQual + Condition1 + 
+      OverallCond + BsmtFinType1 + Functional + GarageCars:GarageFinish, 
+     data = datos_train)
+```
+
+
+The model chosen by the function `stepAIC` might contain highly correlated predictors,
+so we can use the variance inflation factor (VIF) to check this.
+We use the function `vif` in the `car` package: 
+
+```{r, echo=FALSE,warning= FALSE,message = FALSE}
+vif(modelo1, type="predictor")
+```
+
+Since we have interactions, use type="predictor".
+
+We know that VIF>10 is problematic. However, categorical values have more than one parameter associated and we need to take into  account the degrees of freedom. For this reason, we will look at the third column "GVIF^(1/(2*Df))". 
+Nonetheless, this means that we should compare it with the value $\sqrt{10}\approx$ 3.2.
+Therefore, this suggests that we can get rid of "Exists_2nd_floor" or not (3.4 is not too far from 3.2).
+
+```{r, echo=FALSE,warning= FALSE,message = FALSE}
+modelo2=lm(formula = SalePrice ~ KitchenQual + LotArea + Fireplaces + 
+             CentralAir + prop_uf + hay_piscina + SaleCondition + 
+             YearBuilt + Neighborhood + ScreenPorch + total_bath + WoodDeckSF + 
+             MSZoning + MSSubClass + GrLivArea + OverallQual + Condition1 + 
+             OverallCond + BsmtFinType1 + Functional + GarageCars:GarageFinish, 
+           data = datos_train)
+vif(modelo2, type="predictor")
+```
+
+
+Another thing to check is if the logarithmic transformation is appropiate for our response. Transformations of the response are commonly used to achieve normality and/or
+constant variance. In this case, we are told to use the log transformation. In order to justify this, we will use Box-Cox method. This is a technique that searches computationally for the appropriate transformation of the response variable to address normality.
+
+```{r, echo=FALSE,warning= FALSE,message = FALSE}
+mod.boxcox=a=boxcox(object = modelo2, lambda=seq(-0.1,0.1,0.01))
+lambda=mod.boxcox$x[which.max(mod.boxcox$y)]
+```
+
+Indeed $\lambda\approx 0$, so the logarithm transformation is appropriate in our case. 
+
+
+Next, we will seek for the possible interactions between predictor variables. We have already seen many examples during the class lectures that highlight the importance of interactions between variables in a generalized linear model.
+Not only do they allow the model to capture and account for the potential complexity and non-linearity in relationships between predictor variables and the response variable, but they can also improve the overall fit of the model significantly. 
+
+The function anova allow us to compare nested models, so it is rather useful for checking whether the interaction between 2 predictor variables should be included in the model or not.
+
+An intuitive way to look for suspicious interactions is using boxplots. Take, for instance, the following boxplot, where the x-axis corresponds to GarageFinish and we split each category according to GarageCars. 
+
+```{r garagecarsgaragefinish}
+ggplot(datos_train_mod, aes(x = GarageFinish, y = SalePrice, fill = GarageCars)) +
+  geom_boxplot() 
+```
+If there were no interaction between these variables, we would expect each category of GarageFinish to behave similarly. Nonetheless, taking a look at Fin and Unf, it is easy to notice that garages with 4 cars present a different behavior. This could be an indicator of an interaction between these variables. 
+
+As mentioned before, to check whether the interaction should be included or not in the model we use the function anova.
+```{r garagecarsgaragefinish2}
+# Let us define the model without interaction
+model=lm(formula = SalePrice ~
+             KitchenQual +
+             LotArea +
+             BsmtCond +
+             Fireplaces +
+             Exists_2nd_floor +
+             CentralAir +
+             #GarageCars:GarageFinish +
+             SaleCondition +
+             YearBuilt +
+             Neighborhood +
+             ScreenPorch +
+             total_bath + 
+             WoodDeckSF +
+             MSZoning +
+             MSSubClass+
+             Condition1+
+             OverallCond+
+             BsmtFinType1, data = datos_train)
+# Now we define the model including the interaction
+model1=lm(formula = SalePrice ~
+             KitchenQual +
+             LotArea +
+             BsmtCond +
+             Fireplaces +
+             Exists_2nd_floor +
+             CentralAir +
+             GarageCars:GarageFinish +
+             SaleCondition +
+             YearBuilt +
+             Neighborhood +
+             ScreenPorch +
+             total_bath + 
+             WoodDeckSF +
+             MSZoning +
+             MSSubClass+
+             Condition1+
+             OverallCond+
+             BsmtFinType1, data = datos_train)
+# We compare them using anova. model is nested in model1.
+# Since we are in the gaussian setting, we set test="F".
+anova(model,model1,test="F")
+```
+We obtain a p-value smaller than 2.2e-16, which means that the interaction is indeed significant, and we should select model1.
+
+Let us move on now to study other possible interactions. For example, it is very intuitive to think that the variables GarageCars (Size of garage in car capacity) and GarageArea (Size of garage in square feet) have a remarkable interaction. Let us take a look at the scatter plot below, where the x-axis corresponds to GarageArea and we have colored the points according to GarageCars.
+```{r garagecarsgaragearea}
+ggplot(datos_train, aes(x=GarageArea, y=SalePrice, color = GarageCars))+geom_point()
+```
+It is clear that the colors in this plot are not randomly distributed, but they follow a pattern: the more car capacity, the more to the right in the plot. This is what we expected, i.e., the more area, the more car capacity. We could suspect that GarageArea and GarageCars have a significant interaction and depending on the car capacity we should fit a different model. However, we know that these variables are highly correlated, so in order to avoid multicollinearity, we will only include one of them in the model. We will not keep the other one, nor the interaction term.
+
+Let us study now the possible interaction between GrLivArea and OverallQual. Let us proceed as before, with a scatter plot.
+```{r grlivareaoverallqual}
+ggplot(datos_train, aes(x=GrLivArea, y=SalePrice, color = OverallQual))+geom_point() 
+```
+This scatter plot does not look like the previous one. Now, we see that all points are somehow mixed, though it is true that as GrLivArea increases, the OverallQuall seems to increase as well (which is indeed what we would expect). Maybe each group of points in the same color behaves different in comparison to the others and there is a relevant interaction. Let us check this with anova.
+```{r grlivareaoverallqual2}
+# The model without interaction was defined previously as model1.
+# We will create a new model (model2) including the interaction term.
+model2=lm(formula = SalePrice ~
+             GrLivArea:OverallQual+
+             KitchenQual +
+             LotArea +
+             BsmtCond +
+             Fireplaces +
+             Exists_2nd_floor +
+             CentralAir +
+             GarageCars:GarageFinish +
+             SaleCondition +
+             YearBuilt +
+             Neighborhood +
+             ScreenPorch +
+             total_bath + 
+             WoodDeckSF +
+             MSZoning +
+             MSSubClass+
+             Condition1+
+             OverallCond+
+             BsmtFinType1, data = datos_train)
+# We compare them using anova. model1 is clearly nested in model2.
+# Since we are in the gaussian setting, we set test="F".
+anova(model1,model2,test="F")
+```
+
+As we see, the p-value is smaller than 2.2e-16. Thus, the interaction term between GrLivArea and OverallQual will be included in the final model.
+
+Let us consider now the following boxplot.
+```{r centralairbsmtcond}
+ggplot(datos_train, aes(x = CentralAir, y = SalePrice, fill = BsmtFinType1)) +
+  geom_boxplot() 
+```
+Apart from slight differences, we can claim that the categories of BsmtFinType1 have approximately the same behavior independently of whether the house is equipped with central air conditioning or not.Let us check with anova that their interaction is not significant.
+```{r centralairbsmtcond2}
+# The model without interaction was defined previously as model2.
+# We will create a new model (model3) including the interaction term.
+model3=lm(formula = SalePrice ~
+             GrLivArea:OverallQual+
+             BsmtFinType1:CentralAir+
+             KitchenQual +
+             LotArea +
+             BsmtCond +
+             Fireplaces +
+             Exists_2nd_floor +
+             CentralAir +
+             GarageCars:GarageFinish +
+             SaleCondition +
+             YearBuilt +
+             Neighborhood +
+             ScreenPorch +
+             total_bath + 
+             WoodDeckSF +
+             MSZoning +
+             MSSubClass+
+             Condition1+
+             OverallCond+
+             BsmtFinType1, data = datos_train)
+# We compare them using anova. model2 is clearly nested in model3.
+# Since we are in the gaussian setting, we set test="F".
+anova(model2,model3,test="F")
+```
+We obtain a p-value of 0.1779. Hence, we will not to include the interaction between CentralAir and BsmtFinType1 in our model.
+
+Cutting a long story short, the interactions that we will include in the final model are:
+1.OverallQual:GrLivArea
+2.GarageCars:GarageFinish
+
+
+```{r FUNCS, echo = FALSE}
+library(gridExtra)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(ggplot2)
+library(car)
+library(mgcv)
+library(knitr)
+library(broom)
+
+# 0. Funciones
+TransformacionesVariables = function(data, type = "train"){
+  if (type == "train"){
+    data$SalePrice = log(data$SalePrice)
+  }
+  # Tratamiento de NA
+  # BsmtQual if NA means no basement
+  data[is.na(data$BsmtQual),]$BsmtQual = "No_basement"
+  # Fence if NA means no basement
+  data[is.na(data$Fence),]$Fence = "No_fence"
+  # MiscFeature if NA means no basement
+  data[is.na(data$MiscFeature),]$MiscFeature = "None"
+  # BsmtCond if NA means no basement
+  data[is.na(data$BsmtCond),]$BsmtCond = "No_basement"
+  # BsmtFinType1 if NA means no basement
+  data[is.na(data$BsmtFinType1),]$BsmtFinType1 = "No_basement"
+  # BsmtFinType2 if NA means no basement
+  data[is.na(data$BsmtFinType2),]$BsmtFinType2 = "No_basement"
+  # Hay 8 observaciones con variable MasVnrArea a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$MasVnrArea),]$MasVnrArea = 0
+  # Hay muchas observaciones con variable LotFrontage a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$LotFrontage),]$LotFrontage = 0
+  # Hay 8 observaciones con variable MasVnrArea a NA. De momento mando a 0, valorar excluir observaciones
+  data[is.na(data$MasVnrType),]$MasVnrType = 0
+  # Alley if NA means no access
+  data[is.na(data$Alley),]$Alley = "No_access"
+  # FireplaceQu if NA means no access
+  data[is.na(data$FireplaceQu),]$FireplaceQu = "No_Fireplace"
+  # GarageType if NA means no access
+  data[is.na(data$GarageType),]$GarageType = "No_Garage"
+  # GarageFinish if NA means no access
+  data[is.na(data$GarageFinish),]$GarageFinish = "No_Garage"
+  # GarageQual if NA means no access
+  data[is.na(data$GarageQual),]$GarageQual = "No_Garage"
+  # GarageCond if NA means no access
+  data[is.na(data$GarageCond),]$GarageCond = "No_Garage"
+  # BsmtExposure if NA means no access
+  data[is.na(data$BsmtExposure),]$BsmtExposure = "No_basement"
+  # PoolQC if NA means no pool
+  data[is.na(data$PoolQC),]$PoolQC = "No_Pool"
+  # GarageYrBlt if NA 0?
+  data[is.na(data$GarageYrBlt),]$GarageYrBlt = 0
+  data = VarTypeFix(data)
+  # Transformaciones a factor
+  data$MSSubClass = as.factor(data$MSSubClass)
+  # Transformaciones a numeric
+  data$GarageCars = as.numeric(data$GarageCars)
+  data$Fireplaces = as.numeric(data$Fireplaces)
+  data$YearBuilt = as.numeric(data$YearBuilt)
+  data$KitchenQual = factor(data$KitchenQual, levels = c("Ex", "Gd", "TA", "Fa", "Po"))
+  data$KitchenQual = as.numeric(data$KitchenQual)
+  data$OverallCond = as.numeric(data$OverallCond)
+  # Transformaciones a logaritmo
+  data$GrLivArea = log(data$GrLivArea)
+  data$LotArea = log(data$LotArea)
+  
+
+  data$BsmtUnfSF[is.na(data$BsmtUnfSF)] = mean(data$BsmtUnfSF, na.rm = T)
+  data$TotalBsmtSF[is.na(data$TotalBsmtSF)] = mean(data$TotalBsmtSF, na.rm = T)
+  data$GarageCars[is.na(data$GarageCars)] = mean(data$GarageCars, na.rm = T)
+  # Variables de proporcion de metros del basement construidos
+  data$prop_1 = data$BsmtFinSF1 / (data$TotalBsmtSF +0.1)
+  data$prop_2 = data$BsmtFinSF2/ (data$TotalBsmtSF +0.1)
+  data$prop_uf = data$BsmtUnfSF/ (data$TotalBsmtSF +0.1)
+  data$prop_3 = (data$BsmtFinSF1 + data$BsmtFinSF2)/ (data$TotalBsmtSF +0.1)
+  
+  # Variables de proporcion de metros de casa construidos
+  data$cas_1 = data$X1stFlrSF / (data$GrLivArea)
+  data$cas_2 = data$X2ndFlrSF/ (data$GrLivArea)
+  data$cas_low = data$LowQualFinSF/ (data$GrLivArea)
+  # 
+  data$Exists_2nd_floor = 0
+  data$Exists_2nd_floor[data$X2ndFlrSF > 1] <- 1
+  data$Exists_2nd_floor = as.factor(data$Exists_2nd_floor)
+  
+  data$SaleCondition[(data$SaleCondition %in% 
+                                   c("AdjLand",
+                                     "Alloca",
+                                     "Family"))] <- "Other"
+  
+  data$BsmtFullBath[is.na(data$BsmtFullBath)] = 0
+  data$BsmtHalfBath[is.na(data$BsmtHalfBath)] = 0
+  data$FullBath[is.na(data$FullBath)] = 0
+  data$HalfBath[is.na(data$HalfBath)] = 0
+  
+  data$total_bath =
+    as.numeric(data$BsmtFullBath )+
+    as.numeric(data$BsmtHalfBath )+
+    as.numeric(data$FullBath )+
+    as.numeric(data$HalfBath)
+  
+  data$hay_piscina = "0"
+  data$hay_piscina[!(data$PoolQC == "No_Pool")] = "1"
+  
+  data$KitchenQual[is.na(data$KitchenQual)] = getmode(data$KitchenQual)
+  data$MSZoning[is.na(data$MSZoning)] = getmode(data$MSZoning)
+  data$GarageFinish[is.na(data$GarageFinish)] = getmode(data$GarageFinish)
+  
+  
+  return(data)
+}
+
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+GraficosModelo = function(modelo){
+  # Fitted vs real data
+  residuos_modelo = modelo$modelo_final$residuals
+  fitted = modelo$modelo_final$fitted.values
+  fit_vs_res = data.frame(
+    "log_sales_price" = modelo$modelo_final$model$.outcome,
+    "fitted" = fitted)
+  fit_vs_res = fit_vs_res[order(fit_vs_res$log_sales_price),]
+  fit_vs_res$ordered_data = 1:nrow(fit_vs_res)
+  fitted_vs_res_graph <- 
+    ggplot() +
+    geom_line(data = fit_vs_res, aes(x = ordered_data, y = fitted, color = "Fitted")) +
+    geom_line(data = fit_vs_res, aes(x = ordered_data, y = log_sales_price, color = "Log Sales Price")) +
+    theme_minimal() +
+    labs(color = "", y = "Log of Dollars") +  # Set legend title to an empty string and y-axis label
+    scale_x_discrete(name = NULL) +  # Set x-axis label to NULL
+    theme(legend.position = "right")
+  
+  fit_vs_res_dol = data.frame(
+    "log_sales_price" = exp(modelo$modelo_final$model$.outcome),
+    "fitted" = exp(fitted))
+  
+  fit_vs_res_dol = fit_vs_res_dol[order(fit_vs_res_dol$log_sales_price),]
+  fit_vs_res_dol$ordered_data = 1:nrow(fit_vs_res_dol)
+  fitted_vs_res_graph_dol <- 
+    ggplot() +
+    geom_line(data = fit_vs_res_dol, aes(x = ordered_data, y = fitted, color = "Fitted")) +
+    geom_line(data = fit_vs_res_dol, aes(x = ordered_data, y = log_sales_price, color = "Log Sales Price")) +
+    theme_minimal() +
+    labs(color = "", y = "Dollars") +  # Set legend title to an empty string and y-axis label
+    scale_x_discrete(name = NULL) +  # Set x-axis label to NULL
+    theme(legend.position = "right")
+  
+  linearity_res = Linearity(residuos_modelo, fitted)
+  
+  residuos =data.frame(residuos_modelo)
+  colnames(residuos) = c("Residuos")
+  
+  resid_hist = ggplot(residuos, aes(x = Residuos)) +
+    geom_histogram(fill = "#4e79a7", color = "#d53e4f", bins = 30, alpha = 0.7) +
+    labs(title = "Distribution of Residuals",
+         x = "Residuals",
+         y = "Frequency") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.text = element_text(size = 10),
+          axis.title = element_text(size = 12, face = "bold"))
+  
+  residuos$Id = 0
+  residuos = residuos[order(residuos$Residuos),]
+  residuos$Id = 1:nrow(residuos)
+  
+  qqplot_resid = ggplot(residuos, aes(x = Id, y = Residuos)) +
+    geom_point(color = "steelblue", size = 1, alpha = 0.7) +
+    
+    # Add titles and labels
+    ggtitle("Scatter Plot of Residuals") +
+    xlab("ID") +
+    ylab("Residuals") +
+    
+    # Customize theme
+    theme_minimal() +  # You can choose other themes based on your preference
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.text = element_text(size = 10),
+          axis.title = element_text(size = 12, face = "bold"),
+          legend.position = "none")
+  salida_graficos = list(
+    # QQplot
+    fitted_vs_res_graph = fitted_vs_res_graph,
+    linearity_res = linearity_res,
+    fitted_vs_res_graph_dol = fitted_vs_res_graph_dol,
+    resid_hist = resid_hist,
+    qqplot_resid = qqplot_resid
+  )
+}
+
+VarTypeFix = function(datos){
+  # We convert the factors that have been taken as numeric by R
+  selected_cols = c('OverallQual','OverallCond','BsmtFullBath','BsmtHalfBath','FullBath',
+                    'HalfBath','BedroomAbvGr','KitchenAbvGr', 'TotRmsAbvGrd', 'Fireplaces',
+                    'GarageCars','YrSold','MoSold')
+  datos[, selected_cols] <- lapply(datos[, selected_cols], as.factor)
+  return(datos)
+}
+
+Linearity = function(residuos_modelo,fitted){
+  table = data.frame(residual = residuos_modelo, fitted = fitted)
+  Plot = ggplot(table, aes(fitted, residual)) + geom_point() + geom_smooth() + geom_hline(aes(yintercept = 0)) + 
+    theme(panel.grid = element_blank(), panel.background = element_blank())
+
+}
+
+CalculateModel = function(data, seeds = c(100, 14, 423, 4124, 58, 145, 50, 30, 67, 12)){
+  seeds_cv = seeds
+  
+  resultados = data.frame(
+    matrix(nrow = length(seeds_cv),
+           ncol = 5)
+  )
+  colnames(resultados) = c(
+    "Semilla",
+    "MSE",
+    "MAE",
+    "RMSE",
+    "AIC")
+  resultados_dol =resultados
+  objetos_modelo = vector("list", length = length(seeds_cv))
+  
+    
+  set.seed(100)
+  particion = caret::createDataPartition(data$Id, 
+                                         p = 0.8, 
+                                         list = FALSE,
+                                         times = 1)
+  # Crear dataframes de testing y training
+  training_data <- data[data$Id %in% particion, ]
+  testing_data <- data[!(data$Id %in% particion), ]
+  
+  fitControl <- caret::trainControl(
+    method = "repeatedcv",
+    number = 10,
+    repeats = 10)
+  # Entrenamiento del modelo
+
+  modelo <- caret::train(
+    SalePrice ~
+      KitchenQual +
+      LotArea +
+      Fireplaces +
+      Exists_2nd_floor +
+      CentralAir +
+      GarageCars:GarageFinish +
+      prop_uf +# Mejoran metrica pero son raras
+      hay_piscina +
+      SaleCondition +
+      YearBuilt +
+      Neighborhood +
+      ScreenPorch + 
+      total_bath + 
+      WoodDeckSF +
+      MSZoning +
+      MSSubClass +
+      GrLivArea:OverallQual+
+      Condition1 +
+      OverallCond +
+      BsmtFinType1, 
+    data = training_data, 
+    method = "lm", 
+    trControl = fitControl,
+    verbose = FALSE)
+  
+  # Calculo del modelo
+ 
+  # prediccion = stats::predict.bam(modelo,newdata =  testing_data)
+  prediccion = stats::predict(modelo,newdata =  testing_data)
+  
+  resultados_sim = data.frame(
+    "MSE" = mean((as.vector(prediccion)-testing_data$SalePrice)^2),
+    "MAE" = mean(abs(as.vector(prediccion)-testing_data$SalePrice)),
+    "RMSE" = sqrt(mean((as.vector(prediccion)-testing_data$SalePrice)^2)),
+    "AIC" = AIC( modelo$finalModel)
+  )
+  
+  resultados_sim_dol = data.frame(
+    "MSE" = mean((exp(prediccion)-exp(testing_data$SalePrice))^2),
+    "MAE" = mean(abs(exp(prediccion)-exp(testing_data$SalePrice))),
+    "RMSE" = sqrt(mean((exp(prediccion)-exp(testing_data$SalePrice))^2)),
+    "AIC" = AIC( modelo$finalModel)
+  )
+  
+  salidas_modelo = list(
+    modelo = modelo,
+    prediccion = prediccion,
+    resultados_sim = resultados_sim,
+    resultados_sim_dol = resultados_sim_dol
+  )
+
+return(list(
+  modelo_final = modelo$finalModel,
+  resultados_modelo = rbind(resultados_sim, resultados_sim_dol)
+  ))
+}
+
+
+##########################################################################
+############################## MODELIZACION ##############################
+##########################################################################
+
+path = 
+datos_train = read.csv("train.csv")
+
+datos_test = read.csv("test.csv")
+
+source("functions.R")
+
+attach(datos_train)
+# Particion de datos y crossed validation
+datos_train = TransformacionesVariables(datos_train)
+datos_test = TransformacionesVariables(datos_test, "test")
+# Exclusion de valor outlier
+datos_train = datos_train[datos_train$LotArea != max(datos_train$LotArea), ]
+
+#### CV
+modelo_final = CalculateModel(datos_train)
+graficos_modelo = GraficosModelo(modelo_final)
+
+formula_final = formula(modelo_final$modelo_final)
+formula_final[2] = "SalePrice"
+
+
+fitControl <- caret::trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 10)
+# Entrenamiento del modelo
+# Creamos un modelo dummy para que formatee las variables categoricas de la misma manera en train y test
+modelo2 <- caret::train(
+  Id ~
+    KitchenQual +
+    LotArea +
+    Fireplaces +
+    Exists_2nd_floor +
+    CentralAir +
+    GarageCars:GarageFinish +
+    prop_uf +# Mejoran metrica pero son raras
+    hay_piscina +
+    SaleCondition +
+    YearBuilt +
+    Neighborhood +
+    ScreenPorch + 
+    total_bath + 
+    WoodDeckSF +
+    MSZoning +
+    MSSubClass +
+    GrLivArea:OverallQual+
+    Condition1 +
+    OverallCond +
+    BsmtFinType1, 
+  data = datos_test, 
+  method = "lm", 
+  trControl = fitControl,
+  verbose = FALSE)
+
+
+prediccion_datos = predict(modelo_final$modelo_final, newdata =  modelo2$finalModel$model)
+
+datos_fin =exp(prediccion_datos)
+write.csv(datos_fin, "datos_fin.csv")
+
+# 5. Render
+# Aqui hay que meter los objetos
+objets_markdown = list(
+  graphs = graficos_modelo,
+  modelo = modelo_final,
+  formula_final = formula_final,
+  summary = tidy(modelo_final$modelo_final)
+  # ,out_mod = gamtabs(modelo_final$modelo_final)
+)
+
+
+
+
+# Here you must set all the options needed and load the libraries needed
+graphs <- objets_markdown$graphs
+modelo <- objets_markdown$modelo
+formula_final = objets_markdown$formula_final
+#out <- params$reporting$out_mod
+# Other instructions:
+# > &nbsp; is used to insert a page break
+# $~$ is used to insert a blank space (for example space between a table and some text)
+```
+
+## Summary
+
+The final model corresponds with a linear model. It has been decided to use this model since it has proven, through the AIC and the RMSE, to perform quite similar to the Generalized Additive Model that we have computed. The formula is as follows:
+
+`r formula_final`
+
+The dependent variable has been transformed into logarithm since it was advised and the Box-Cox transformation suggested it. The adjusted R-squared is `r round(summary(modelo$modelo_final)$r.sq,4 )*100`
+
+The coefficients and corresponding p-values can be checked in the annex. There are some variables that have proven to be non significant but we have included them since the ANOVA suggested so and the metrics were getting worse when we excluded them. This happens for categorical variables and our interpretation of this issue is that some categories within a categorical variable are very significant and others do not bring much information. Most of the times this has to do with imbalanced data. 
+
+The following table contains in the first line the stats for the model with the logarithm as dependent variable and the exponential variable in the second line. This way we can have a real image of the metrics:
+
+```{r resultados, echo=FALSE,warning= FALSE,message = FALSE, fig.align='center',, fig.height=3}
+modelo$resultados_modelo
+```
+
+As it can be seen, the RMSE is close to 24.000 and the MAE is close to 14.400 which we have considered a good result.
+
+In the following image, on the left hand side there is the graph containing the fitted values vs the logarithm sales price and on the right hand side the fitted values vs the sale price, without any transformation:
+
+```{r abc, echo=FALSE,warning= FALSE,message = FALSE, fig.align='center', fig.height=3}
+grid.arrange(graphs$fitted_vs_res_graph, graphs$fitted_vs_res_graph_dol)
+```
+\newpage
+
+## Residuals
+
+By having a look to the residuals, it can be seen that the are a few more outliers towards the lowest and highest prices but the shape and variance is quite continuous:
+
+```{r abcd, echo=FALSE,warning= FALSE,message = FALSE, fig.align='center', fig.height=3}
+graphs$linearity_res
+```
+
+This can be confirmed by having a look to the qqplot and the histogram:
+
+```{r abcdef, echo=FALSE,warning= FALSE,message = FALSE, fig.align='center',fig.height=3}
+ grid.arrange(graphs$resid_hist, graphs$qqplot_resid, ncol = 2)
+```
+
+Although the shape of the qqplot gets large values towards the tails, it can be seen that the histogram of distribution of the residuals denotes a clear normal distribution.
+
+We have tried to get rid of this shape by using different transformations of both the dependent and independent variables. One possible solution to this problem could be dealing with quantile regressions and thus having different coefficients for the lowest and highest sale prices. 
+
+\newpage
+
+# Anexo
+
+```{r summ, echo=FALSE,warning= FALSE,message = FALSE, fig.align='center', fig.height=3}
+ tibble(tidy(modelo_final$modelo_final)) %>% print(n = 2000)
+```
